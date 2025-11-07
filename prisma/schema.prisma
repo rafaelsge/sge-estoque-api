@@ -1,0 +1,69 @@
+datasource db {
+  provider = "mysql" // ou postgresql, conforme seu setup
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Loja {
+  id       Int       @id @default(autoincrement())
+  codigo   Int       @unique
+  nome     String
+  cidade   String
+  usuarios Usuario[]
+  produtos Produto[]
+}
+
+model Usuario {
+  id         Int      @id @default(autoincrement())
+  codigo     Int      // código do ERP
+  nome       String
+  email      String?
+  telefone   String?
+  senha_md5  String?
+  cod_loja   Int
+  loja       Loja     @relation(fields: [cod_loja], references: [codigo])
+  tokens     TokenRecuperacao[]
+}
+
+model Produto {
+  id             Int      @id @default(autoincrement())
+  codigo         Int
+  nome           String
+  unidade_medida String
+  codigo_barras  String?
+  cod_loja       Int
+  loja           Loja     @relation(fields: [cod_loja], references: [codigo])
+  eans           Ean[]
+
+  @@unique([cod_loja, codigo])
+}
+
+model Ean {
+  id           Int      @id @default(autoincrement())
+  cod_loja     Int
+  cod_produto  Int
+  codigo_barras String
+  produto      Produto  @relation(fields: [cod_loja, cod_produto], references: [cod_loja, codigo])
+}
+
+model Contagem {
+  id           Int      @id @default(autoincrement())
+  cod_loja     Int
+  cod_usuario  Int
+  cod_produto  Int
+  qtde         Float
+  sincronizado Boolean  @default(false)
+  updated_at     DateTime @updatedAt
+  created_at     DateTime @default(now())
+}
+  
+model TokenRecuperacao {
+  id          Int      @id @default(autoincrement())
+  id_usuario  Int
+  token       String   @unique
+  expira_em   DateTime
+  usuario     Usuario  @relation(fields: [id_usuario], references: [id])
+}
