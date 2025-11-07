@@ -1,0 +1,7 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+src/**/*.spec.ts
+src/**/*.test.ts
+dist/*.map
