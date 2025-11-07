@@ -6,9 +6,18 @@ WORKDIR /app
 
 # Copia os arquivos de dependência
 COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY prisma ./prisma
+COPY src ./src
 
 # Instala apenas as dependências de produção
-RUN npm install --production
+#RUN npm install --production
+
+RUN npx prisma generate
+
+RUN npm run build
 
 # Copia o restante do código da API
 COPY . .
