@@ -1,20 +1,20 @@
-# Etapa 1: imagem base oficial do Node
+# Usa a imagem base oficial do Node.js (versão leve e estável)
 FROM node:18-alpine
 
-# Define o diretório de trabalho
+# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# Copia arquivos de dependência
+# Copia os arquivos de dependência
 COPY package*.json ./
 
-# Instala dependências (produção)
+# Instala apenas as dependências de produção
 RUN npm install --production
 
-# Copia o restante do código
+# Copia o restante do código da API
 COPY . .
 
-# Expõe a porta usada pela API
+# Expõe a porta onde a API vai rodar
 EXPOSE 3001
 
-# Comando padrão de inicialização
+# Define o comando padrão para iniciar o servidor
 CMD ["npm", "start"]
