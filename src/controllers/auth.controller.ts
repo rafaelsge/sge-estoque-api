@@ -145,7 +145,7 @@ export async function forgotPassword(req: Request, res: Response) {
     const token = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    await prisma.tokenRecuperacao.create({
+    await prisma.tokenrecuperacao.create({
       data: {
         id_usuario: usuario.id,
         token,
@@ -226,7 +226,7 @@ export async function resetPassword(req: Request, res: Response) {
         .json({ error: 'token e nova_senha_md5 são obrigatórios.' });
     }
 
-    const tokenRec = await prisma.tokenRecuperacao.findFirst({
+    const tokenRec = await prisma.tokenrecuperacao.findFirst({
       where: { token },
     });
 
@@ -239,7 +239,7 @@ export async function resetPassword(req: Request, res: Response) {
       data: { senha_md5: nova_senha_md5 },
     });
 
-    await prisma.tokenRecuperacao.delete({
+    await prisma.tokenrecuperacao.delete({
       where: { id: tokenRec.id },
     });
 
