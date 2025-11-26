@@ -1,28 +1,44 @@
-# Usa a imagem base oficial do Node.js (versão leve e estável)
-FROM node:22.17.0-bullseye
+# ---------- STAGE 1: Build ----------
+FROM node:22.17.0-bullseye AS builder
 
-# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# Copia os arquivos de dependência
+# Copia pacotes
 COPY package*.json ./
 
-RUN npm install --production
+# Instala dependências (inclui devDependencies para compilar TS)
+RUN npm install
 
+# Copia tudo para o builder
 COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
 
+# Gera prisma client
 RUN npx prisma generate
 
-# Instala apenas as dependências de produção
-RUN npm install --production
+# Compila TS para JS
+RUN npm run build
 
-# Copia o restante do código da API
-COPY . .
 
-# Expõe a porta onde a API vai rodar
-EXPOSE 3001
+# ---------- STAGE 2: Production ----------
+FROM node:22.17.0-bullseye AS production
 
-# Define o comando padrão para iniciar o servidor
-CMD ["npm", "start"]
+WORKDIR /app
+
+# Instala apenas dependências de produção
+COPY package*.json ./
+RUN npm install --omit=dev
+
+# Copia o Prisma Client já gerado
+COPY --from=builder /app/node_modules/.prisma /app/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/node_modules/@prisma
+
+# Copia os arquivos compilados
+COPY --from=builder /app/dist ./dist
+
+# Copia prisma schema (às vezes necessário)
+COPY --from=builder /app/prisma ./prisma
+
+# Inicia a aplicação
+CMD ["node", "dist/index.js"]
