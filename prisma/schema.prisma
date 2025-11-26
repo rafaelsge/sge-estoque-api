@@ -25,7 +25,7 @@ model usuario {
   senha_md5  String?
   cod_loja   Int
   loja       loja     @relation(fields: [cod_loja], references: [codigo])
-  tokens     tokenRecuperacao[]
+  tokens     tokenrecuperacao[]
 }
 
 model produto {
