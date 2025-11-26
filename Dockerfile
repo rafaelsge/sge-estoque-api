@@ -1,44 +1,53 @@
-# ---------- STAGE 1: Build ----------
+###############################################
+### STAGE 1 — BUILDER (compila TypeScript)
+###############################################
 FROM node:22.17.0-bullseye AS builder
 
 WORKDIR /app
 
-# Copia pacotes
+# Copia dependências
 COPY package*.json ./
 
-# Instala dependências (inclui devDependencies para compilar TS)
+# Instala tudo (inclui devDependencies)
 RUN npm install
 
-# Copia tudo para o builder
+# Copia restante do projeto
 COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
 
-# Gera prisma client
+# Gera Prisma Client
 RUN npx prisma generate
 
-# Compila TS para JS
+# Compila TS → JS
 RUN npm run build
 
 
-# ---------- STAGE 2: Production ----------
+###############################################
+### STAGE 2 — RUNNER (produção)
+###############################################
 FROM node:22.17.0-bullseye AS production
 
 WORKDIR /app
 
-# Instala apenas dependências de produção
+# Copia somente dependências
 COPY package*.json ./
+
+# Instala apenas dependências de produção
 RUN npm install --omit=dev
 
-# Copia o Prisma Client já gerado
+# Copia Prisma Client gerado
 COPY --from=builder /app/node_modules/.prisma /app/node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma /app/node_modules/@prisma
 
-# Copia os arquivos compilados
+# Copia arquivos compilados
 COPY --from=builder /app/dist ./dist
 
-# Copia prisma schema (às vezes necessário)
-COPY --from=builder /app/prisma ./prisma
+# Copia schema (caso precise no runtime)
+COPY prisma ./prisma
 
-# Inicia a aplicação
+# Porta da API
+EXPOSE 3001
+
+# Start
 CMD ["node", "dist/index.js"]
