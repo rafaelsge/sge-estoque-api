@@ -7,7 +7,7 @@ WORKDIR /app
 # Copia os arquivos de dependência
 COPY package*.json ./
 
-RUN npm ci
+RUN npm install --production
 
 COPY tsconfig.json ./
 COPY prisma ./prisma
