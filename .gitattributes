@@ -1,0 +1,56 @@
+###############################################################################
+# FORCE UNIFORM LINE ENDINGS (LF)
+###############################################################################
+
+# Force LF for all text-like source files
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.js     text eol=lf
+*.jsx    text eol=lf
+*.json   text eol=lf
+*.sql    text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.env    text eol=lf
+*.toml   text eol=lf
+
+# Prisma
+prisma/*.prisma  text eol=lf
+prisma/**/*.prisma text eol=lf
+prisma/**/*.sql    text eol=lf
+
+# Scripts
+*.sh     text eol=lf
+*.bat    text eol=lf
+*.ps1    text eol=lf
+
+###############################################################################
+# BINARY FILES (never convert)
+###############################################################################
+
+# Images
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+
+# Fonts
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Other binary formats
+*.exe   binary
+*.dll   binary
+*.zip   binary
+*.pdf   binary
+
+###############################################################################
+# AUTO NORMALIZE NEW FILES
+###############################################################################
+* text=auto
