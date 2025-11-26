@@ -1,0 +1,46 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+
+# Compiled build
+dist/
+build/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Prisma
+prisma/*.db
+prisma/migrations/*-shadow.db
+
+# Logs
+logs/
+*.log
+
+# VSCode
+.vscode/
+
+# Visual Studio / VS
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Crash logs
+*.stackdump
+
+# Temp
+tmp/
+temp/
+*.tmp

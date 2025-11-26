@@ -1,5 +1,6 @@
 import { prisma } from '../prismaClient';
 import { Request, Response } from 'express';
+import crypto from 'crypto'; // para gerar lote seguro
 
 /**
  * 🔄 Rota de sincronização — sempre cria novas leituras (nunca atualiza)
@@ -26,7 +27,8 @@ export async function syncContagens(req: Request, res: Response) {
           cod_usuario,
           cod_produto,
           qtde,
-          sincronizado: false, // 🔹 sempre começa como não sincronizado
+          sincronizado: false, // sempre começa como não sincronizado
+          lote: null,          // lote só será gerado pelo ERP
           created_at: created_at ? new Date(created_at) : new Date(),
         },
       });
@@ -39,6 +41,7 @@ export async function syncContagens(req: Request, res: Response) {
       inseridos: criados.length,
       ids: criados,
     });
+
   } catch (error) {
     console.error('Erro em syncContagens:', error);
     return res.status(500).json({ error: 'Erro ao sincronizar contagens.' });
@@ -47,7 +50,7 @@ export async function syncContagens(req: Request, res: Response) {
 
 /**
  * 🧾 Rota para o ERP buscar contagens pendentes (sincronizado = false)
- * Exemplo: GET /contagens/pendentes?cod_loja=1
+ * Agora gera um lote e marca os registros localmente.
  */
 export async function listarContagensPendentes(req: Request, res: Response) {
   try {
@@ -56,15 +59,44 @@ export async function listarContagensPendentes(req: Request, res: Response) {
       return res.status(400).json({ error: 'Parâmetro cod_loja é obrigatório.' });
     }
 
+    // Busca pendentes
     const pendentes = await prisma.contagem.findMany({
       where: { cod_loja, sincronizado: false },
       orderBy: { created_at: 'asc' },
     });
 
-    return res.json({
-      total: pendentes.length,
-      data: pendentes,
+    if (pendentes.length === 0) {
+      return res.json({ total: 0, lote: null, data: [] });
+    }
+
+    // 🔹 Gera um lote único
+    const lote = crypto.randomUUID();
+
+    // 🔹 Atualiza todas as contagens pendentes com o lote gerado e marca como sincronizado
+    await prisma.contagem.updateMany({
+      where: {
+        id: { in: pendentes.map((p) => p.id) }
+      },
+      data: {
+        lote,
+        sincronizado: true,
+        updated_at: new Date(),
+      },
     });
+
+    // 🔹 Recria objetos com o lote aplicado
+    const registrosAtualizados = pendentes.map((p) => ({
+      ...p,
+      lote,
+      sincronizado: true,
+    }));
+
+    return res.json({
+      total: registrosAtualizados.length,
+      lote,
+      data: registrosAtualizados,
+    });
+
   } catch (error) {
     console.error('Erro em listarContagensPendentes:', error);
     return res.status(500).json({ error: 'Erro ao listar contagens pendentes.' });
@@ -85,13 +117,17 @@ export async function marcarContagensSincronizadas(req: Request, res: Response) 
 
     const atualizados = await prisma.contagem.updateMany({
       where: { id: { in: ids } },
-      data: { sincronizado: true, updated_at: new Date() },
+      data: {
+        sincronizado: true,
+        updated_at: new Date(),
+      },
     });
 
     return res.json({
       message: 'Contagens atualizadas como sincronizadas.',
       total_atualizadas: atualizados.count,
     });
+
   } catch (error) {
     console.error('Erro em marcarContagensSincronizadas:', error);
     return res.status(500).json({ error: 'Erro ao atualizar contagens.' });
