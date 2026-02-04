@@ -109,6 +109,7 @@ export default router;
  *         ativo:
  *           type: integer
  *           example: 1
+ */
  *         produto:
  *           $ref: '#/components/schemas/Produto'
  *

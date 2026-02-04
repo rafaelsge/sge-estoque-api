@@ -16,6 +16,11 @@ COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
 
+# Instala dependências backend e gera Prisma Client
+ENV NODE_ENV=development
+RUN npm install --production=false
+RUN npx prisma generate
+
 
 # Compila TS → JS
 RUN npm run build
