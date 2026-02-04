@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   cadastrarProdutoValidade,
+  inativarValidade,
   listarValidadesProximas,
 } from '../controllers/validade.controller';
 
@@ -63,10 +64,16 @@ router.post('/cadastrar', cadastrarProdutoValidade);
  *         description: Codigo da loja
  *       - in: query
  *         name: dias
- *         required: true
+ *         required: false
  *         schema:
  *           type: integer
- *         description: Quantidade de dias a partir de hoje
+ *         description: Quantidade de dias a partir de hoje (se omitido, retorna todos os vencimentos ativos)
+ *       - in: query
+ *         name: cod_produto
+ *         required: false
+ *         schema:
+ *           type: integer
+ *         description: Codigo do produto (se informado, filtra pelo produto da loja)
  *     responses:
  *       200:
  *         description: Lista de lotes com validade proxima
@@ -83,6 +90,34 @@ router.post('/cadastrar', cadastrarProdutoValidade);
  *                     $ref: '#/components/schemas/ProdutoValidade'
  */
 router.get('/proximos', listarValidadesProximas);
+
+/**
+ * @swagger
+ * /validade/inativar:
+ *   patch:
+ *     summary: Inativa um lote de validade pelo ID
+ *     tags: [Validades]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 example: 10
+ *     responses:
+ *       200:
+ *         description: Lote inativado com sucesso
+ *       400:
+ *         description: Dados invalidos
+ *       404:
+ *         description: Lote nao encontrado
+ */
+router.patch('/inativar', inativarValidade);
 
 export default router;
 
@@ -109,8 +144,6 @@ export default router;
  *         ativo:
  *           type: integer
  *           example: 1
- *         produto:
- *           $ref: '#/components/schemas/Produto'
  *
  *     ProdutoValidadeInput:
  *       type: object
