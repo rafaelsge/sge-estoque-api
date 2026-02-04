@@ -9,6 +9,7 @@ import contagensRoutes from './routes/contagens.routes';
 import eansRoutes from './routes/eans.routes'; // 
 import lojasRoutes from './routes/lojas.routes';
 import usuariosRoutes from './routes/usuarios.routes';
+import validadeRoutes from './routes/validade.routes';
 import { setupSwagger } from './swagger'; // 
 
 const app = express();
@@ -22,6 +23,7 @@ app.use('/contagens', contagensRoutes);
 app.use('/eans', eansRoutes);
 app.use('/lojas', lojasRoutes);
 app.use('/usuarios', usuariosRoutes);
+app.use('/validade', validadeRoutes);
 
 setupSwagger(app); // 👈 ativa o Swagger em /api-docs
 
