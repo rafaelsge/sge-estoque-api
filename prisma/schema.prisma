@@ -81,3 +81,11 @@ model tokenrecuperacao {
   expira_em   DateTime
   usuario     usuario  @relation(fields: [id_usuario], references: [id])
 }
+
+model configuracao {
+  id       Int     @id @default(autoincrement())
+  codigo   Int
+  cod_loja Int?
+  nome     String?
+  valor    String?
+}
