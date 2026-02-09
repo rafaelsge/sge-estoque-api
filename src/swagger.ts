@@ -15,12 +15,12 @@ Permite login de usuários, sincronização de contagens e atualização de prod
         `,
         contact: {
           name: 'Equipe SGE Software',
-          email: 'suporte@sgesistema.com.br',
+          email: 'rafael@sgeerp.com.br',
         },
       },
       servers: [
         {
-          url: 'http://localhost:3001',
+          url: 'http://192.168.1.24:3001/',
           description: 'Servidor Local',
         },
       ],
@@ -31,5 +31,5 @@ Permite login de usuários, sincronização de contagens e atualização de prod
   const swaggerSpec = swaggerJSDoc(options);
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
 
-  console.log('📘 Swagger disponível em: http://localhost:3001/api-docs');
+  console.log('📘 Swagger disponível em: http://192.168.1.24:3001/api-docs');
 }
