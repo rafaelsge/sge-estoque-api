@@ -18,3 +18,8 @@ CREATE TABLE `configuracao` (
   `valor` VARCHAR(250),
   PRIMARY KEY (`id`) 
 );
+
+
+ALTER TABLE `produto`   
+	ADD COLUMN `pr_venda` DECIMAL(12,2) DEFAULT 0.00 NULL AFTER `cod_loja`,
+	ADD COLUMN `pr_custo` DECIMAL(12,2) DEFAULT 0.00 NULL AFTER `pr_venda`;

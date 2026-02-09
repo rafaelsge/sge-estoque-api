@@ -128,12 +128,16 @@ router.get('/eans', listarEans);
  *                   nome: "Coca-Cola 2L"
  *                   unidade_medida: "UN"
  *                   codigo_barras: "7894900011517"
+ *                   pr_venda: 12.50
+ *                   pr_custo: 8.90
  *                   eans: ["7894900011518", "7894900011519"]
  *                 - codigo: 100
  *                   cod_loja: 2
  *                   nome: "Coca-Cola 2L (Loja 2)"
  *                   unidade_medida: "UN"
  *                   codigo_barras: "7894900011517"
+ *                   pr_venda: 12.50
+ *                   pr_custo: 8.90
  *     responses:
  *       201:
  *         description: Produto(s) cadastrado(s) com sucesso
@@ -171,6 +175,12 @@ router.post('/cadastrar', cadastrarProduto);
  *               codigo_barras:
  *                 type: string
  *                 example: "7894900011517"
+ *               pr_venda:
+ *                 type: number
+ *                 example: 12.50
+ *               pr_custo:
+ *                 type: number
+ *                 example: 8.90
  *     responses:
  *       200:
  *         description: Produto atualizado com sucesso
@@ -226,7 +236,14 @@ export default router;
  *           type: string
  *           nullable: true
  *           description: Código de barras principal do produto
- *
+ *         pr_venda:
+ *           type: number
+ *           example: 12.50
+ *           description: Preco de venda do produto
+ *         pr_custo:
+ *           type: number
+ *           example: 8.90
+ *           description: Preco de custo do produto
  *     ProdutoInput:
  *       type: object
  *       required:
@@ -251,12 +268,17 @@ export default router;
  *         codigo_barras:
  *           type: string
  *           example: "7894900011520"
+ *         pr_venda:
+ *           type: number
+ *           example: 12.50
+ *         pr_custo:
+ *           type: number
+ *           example: 8.90
  *         eans:
  *           type: array
  *           items:
  *             type: string
- *           description: Lista de códigos de barras alternativos (vinculados ao campo `codigo`)
- *
+ *           description: Lista de Códigos de barras alternativos (vinculados ao campo `codigo`)
  *     Ean:
  *       type: object
  *       properties:

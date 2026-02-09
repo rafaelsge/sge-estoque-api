@@ -19,7 +19,9 @@ export async function fullSync(req: Request, res: Response) {
         cod_loja: true,
         nome: true,
         unidade_medida: true,
-        codigo_barras: true
+        codigo_barras: true,
+        pr_venda: true,
+        pr_custo: true
       }
     }),
     prisma.ean.findMany({

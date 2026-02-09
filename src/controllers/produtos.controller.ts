@@ -120,6 +120,8 @@ export async function cadastrarProduto(req: Request, res: Response) {
         nome: p.nome,
         unidade_medida: p.unidade_medida,
         codigo_barras: p.codigo_barras || null,
+        pr_venda: p.pr_venda,
+        pr_custo: p.pr_custo,
       })),
     });
 
@@ -152,7 +154,7 @@ export async function cadastrarProduto(req: Request, res: Response) {
 export async function atualizarProduto(req: Request, res: Response) {
   try {
     const id = Number(req.params.id);
-    const { nome, unidade_medida, codigo_barras } = req.body;
+    const { nome, unidade_medida, codigo_barras, pr_venda, pr_custo } = req.body;
 
     if (!id) return res.status(400).json({ error: 'ID ¨¦ obrigat¨®rio' });
 
@@ -165,6 +167,8 @@ export async function atualizarProduto(req: Request, res: Response) {
         nome: nome ?? produto.nome,
         unidade_medida: unidade_medida ?? produto.unidade_medida,
         codigo_barras: codigo_barras ?? produto.codigo_barras,
+        pr_venda: pr_venda ?? produto.pr_venda,
+        pr_custo: pr_custo ?? produto.pr_custo,
       },
     });
 
