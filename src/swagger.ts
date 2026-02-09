@@ -1,6 +1,7 @@
 import swaggerJSDoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import { Express } from 'express';
+import path from 'path';
 
 export function setupSwagger(app: Express) {
   const options = {
@@ -25,7 +26,11 @@ Permite login de usuários, sincronização de contagens e atualização de prod
         },
       ],
     },
-    apis: ['./src/routes/*.ts'], // lê as anotações das rotas
+    // Suporta execução via ts-node (src) e build (dist)
+    apis: [
+      path.join(__dirname, 'routes', '*.ts'),
+      path.join(__dirname, 'routes', '*.js'),
+    ],
   };
 
   const swaggerSpec = swaggerJSDoc(options);
