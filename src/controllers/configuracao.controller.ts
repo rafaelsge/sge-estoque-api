@@ -46,10 +46,12 @@ export async function cadastrarConfiguracao(req: Request, res: Response) {
     const existentesPorLoja = new Map<number, number[]>();
 
     for (const e of existentes) {
-      const key = `${e.cod_loja}:${e.codigo}`;
+      const cod_loja = e.cod_loja;
+      if (cod_loja === null) continue;
+      const key = `${cod_loja}:${e.codigo}`;
       existentesMap.set(key, e);
-      if (!existentesPorLoja.has(e.cod_loja)) existentesPorLoja.set(e.cod_loja, []);
-      existentesPorLoja.get(e.cod_loja)!.push(e.codigo);
+      if (!existentesPorLoja.has(cod_loja)) existentesPorLoja.set(cod_loja, []);
+      existentesPorLoja.get(cod_loja)!.push(e.codigo);
     }
 
     const codigosPorLoja = new Map<number, Set<number>>();

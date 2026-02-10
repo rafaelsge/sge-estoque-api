@@ -237,12 +237,11 @@ export async function cadastrarProduto(req: Request, res: Response) {
         });
       }
 
-      const eans = Array.isArray(p.eans)
-        ? p.eans
-            .map((ean: any) => String(ean).trim())
-            .filter((ean: string) => ean.length > 0)
-        : [];
-      const uniqueEans = Array.from(new Set(eans));
+      const rawEans: any[] = Array.isArray(p.eans) ? p.eans : [];
+      const eans: string[] = rawEans
+        .map((ean: any) => String(ean).trim())
+        .filter((ean: string) => ean.length > 0);
+      const uniqueEans: string[] = Array.from(new Set<string>(eans));
 
       eanOps.push(
         prisma.ean.deleteMany({ where: { cod_loja, cod_produto: codigo } }),
