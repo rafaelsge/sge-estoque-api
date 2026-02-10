@@ -8,36 +8,111 @@ export async function cadastrarLoja(req: Request, res: Response) {
   try {
     const body = req.body;
     const lojas = Array.isArray(body) ? body : [body];
+    const isBatch = Array.isArray(body);
 
-    // Validação básica
+    if (lojas.length === 0) {
+      return res.status(400).json({ error: 'Nenhuma loja informada.' });
+    }
+
+    const seenCodigos = new Set<number>();
+
     for (const loja of lojas) {
       if (!loja.codigo || !loja.nome || !loja.cidade) {
         return res.status(400).json({
-          error: 'Cada loja deve conter código, nome e cidade.',
+          error: 'Cada loja deve conter codigo, nome e cidade.',
         });
+      }
+
+      const codigo = Number(loja.codigo);
+      if (!Number.isFinite(codigo) || codigo <= 0) {
+        return res.status(400).json({
+          error: 'Codigo da loja deve ser um numero valido.',
+        });
+      }
+      if (seenCodigos.has(codigo)) {
+        return res.status(400).json({
+          error: `Loja duplicada no payload para codigo ${codigo}.`,
+        });
+      }
+      seenCodigos.add(codigo);
+    }
+
+    const codigos = Array.from(
+      new Set(
+        lojas
+          .map((l) => Number(l.codigo))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    );
+
+    const existentes = isBatch
+      ? await prisma.loja.findMany()
+      : await prisma.loja.findMany({ where: { codigo: { in: codigos } } });
+
+    const existentesMap = new Map<number, typeof existentes[number]>();
+    for (const e of existentes) {
+      existentesMap.set(e.codigo, e);
+    }
+
+    const createData: any[] = [];
+    const updateOps: any[] = [];
+
+    for (const l of lojas) {
+      const codigo = Number(l.codigo);
+      const nome = String(l.nome);
+      const cidade = String(l.cidade);
+
+      const existing = existentesMap.get(codigo);
+
+      if (!existing) {
+        createData.push({ codigo, nome, cidade });
+      } else {
+        const data: any = {};
+        if (nome !== existing.nome) data.nome = nome;
+        if (cidade !== existing.cidade) data.cidade = cidade;
+
+        if (Object.keys(data).length > 0) {
+          updateOps.push(prisma.loja.update({ where: { id: existing.id }, data }));
+        }
       }
     }
 
-    // Insere todas (sem bloqueio de duplicados)
-    const result = await prisma.loja.createMany({
-      data: lojas.map((l) => ({
-        codigo: l.codigo, // código ERP
-        nome: l.nome,
-        cidade: l.cidade,
-      })),
-      skipDuplicates: false, // permite repetição de código se desejado
-    });
+    const deleteOps: any[] = [];
+    let removidos = 0;
+
+    if (isBatch) {
+      const incoming = new Set(codigos);
+      const toDelete = existentes
+        .map((e) => e.codigo)
+        .filter((codigo) => !incoming.has(codigo));
+
+      if (toDelete.length > 0) {
+        removidos = toDelete.length;
+        deleteOps.push(
+          prisma.loja.deleteMany({ where: { codigo: { in: toDelete } } }),
+        );
+      }
+    }
+
+    const ops: any[] = [];
+    if (createData.length > 0) ops.push(prisma.loja.createMany({ data: createData }));
+    ops.push(...updateOps, ...deleteOps);
+
+    if (ops.length > 0) {
+      await prisma.$transaction(ops);
+    }
 
     return res.status(201).json({
-      message: 'Lojas cadastradas com sucesso.',
-      inseridas: result.count,
+      message: 'Lojas processadas com sucesso.',
+      inseridas: createData.length,
+      atualizadas: updateOps.length,
+      removidas: removidos,
     });
   } catch (error) {
     console.error('Erro em cadastrarLoja:', error);
     return res.status(500).json({ error: 'Erro ao cadastrar lojas.' });
   }
 }
-
 /**
  * 📋 Lista todas as lojas
  */
