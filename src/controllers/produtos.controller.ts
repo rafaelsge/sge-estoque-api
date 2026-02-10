@@ -109,10 +109,13 @@ export async function cadastrarProduto(req: Request, res: Response) {
       return res.status(400).json({ error: 'Nenhum produto informado.' });
     }
 
-    for (const p of produtos) {
+    for (let i = 0; i < produtos.length; i++) {
+      const p = produtos[i];
       if (!p.cod_loja || !p.codigo || !p.nome || !p.unidade_medida) {
         return res.status(400).json({
           error: 'Campos obrigatorios: cod_loja, codigo, nome e unidade_medida.',
+          index: i,
+          registro: p,
         });
       }
 
@@ -121,6 +124,8 @@ export async function cadastrarProduto(req: Request, res: Response) {
       if (!Number.isFinite(cod_loja) || cod_loja <= 0 || !Number.isFinite(codigo) || codigo <= 0) {
         return res.status(400).json({
           error: 'cod_loja e codigo devem ser numeros validos.',
+          index: i,
+          registro: p,
         });
       }
     }
