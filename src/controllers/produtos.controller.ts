@@ -244,7 +244,19 @@ export async function cadastrarProduto(req: Request, res: Response) {
 
       const rawEans: any[] = Array.isArray(p.eans) ? p.eans : [];
       const eans: string[] = rawEans
-        .map((ean: any) => String(ean).trim())
+        .map((item: any) => {
+          if (typeof item === 'string' || typeof item === 'number') return String(item);
+          if (item && typeof item === 'object') {
+            if (Object.prototype.hasOwnProperty.call(item, 'barras') && item.barras !== null && item.barras !== undefined) {
+              return String(item.barras);
+            }
+            if (Object.prototype.hasOwnProperty.call(item, 'codigo_barras') && item.codigo_barras !== null && item.codigo_barras !== undefined) {
+              return String(item.codigo_barras);
+            }
+          }
+          return '';
+        })
+        .map((ean: string) => ean.trim())
         .filter((ean: string) => ean.length > 0);
       const uniqueEans: string[] = Array.from(new Set<string>(eans));
 
