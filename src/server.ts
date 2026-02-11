@@ -11,6 +11,7 @@ import lojasRoutes from './routes/lojas.routes';
 import usuariosRoutes from './routes/usuarios.routes';
 import validadeRoutes from './routes/validade.routes';
 import configuracaoRoutes from './routes/configuracao.routes';
+import pedidosRestauranteRoutes from './routes/pedidos_restaurante.routes';
 import { setupSwagger } from './swagger'; // 
 
 const app = express();
@@ -26,6 +27,7 @@ app.use('/lojas', lojasRoutes);
 app.use('/usuarios', usuariosRoutes);
 app.use('/validade', validadeRoutes);
 app.use('/configuracao', configuracaoRoutes);
+app.use('/pedidos/restaurante', pedidosRestauranteRoutes);
 
 setupSwagger(app); // 👈 ativa o Swagger em /api-docs
 

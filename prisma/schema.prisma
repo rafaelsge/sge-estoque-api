@@ -91,3 +91,29 @@ model configuracao {
   nome     String?
   valor    String?
 }
+
+model pedido_restaurante {
+  id            Int      @id @default(autoincrement())
+  cod_loja      Int
+  cod_usuario   Int
+  codigo_cartao String?
+  data_hora     DateTime
+  origem        String?
+  total_itens   Int
+  total_pedido  Decimal  @db.Decimal(12,2)
+  created_at    DateTime @default(now())
+  itens         pedido_restaurante_item[]
+}
+
+model pedido_restaurante_item {
+  id          Int     @id @default(autoincrement())
+  pedido_id   Int
+  cod_produto Int
+  descricao   String
+  quantidade  Decimal @db.Decimal(12,3)
+  pr_venda    Decimal @db.Decimal(12,2)
+  pr_custo    Decimal @db.Decimal(12,2)
+  subtotal    Decimal @db.Decimal(12,2)
+
+  pedido pedido_restaurante @relation(fields: [pedido_id], references: [id], onDelete: Cascade)
+}
