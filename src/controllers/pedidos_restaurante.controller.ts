@@ -174,15 +174,24 @@ export async function listarPedidosRestauranteLiberados(req: Request, res: Respo
       codigo_cartao = value;
     }
 
+    const where = {
+      cod_loja,
+      status: STATUS_LIBERADO,
+      ...(codigo_cartao ? { codigo_cartao } : {}),
+    };
+
     const pedidos = await prisma.pedido_restaurante.findMany({
-      where: {
-        cod_loja,
-        status: STATUS_LIBERADO,
-        ...(codigo_cartao ? { codigo_cartao } : {}),
-      },
+      where,
       include: { itens: true },
       orderBy: { data_hora: 'asc' },
     });
+
+    if (codigo_cartao && pedidos.length === 0) {
+      return res.status(404).json({
+        error: 'Nenhum pedido liberado encontrado para o codigo_cartao informado.',
+        codigo_cartao,
+      });
+    }
 
     return res.json({ total: pedidos.length, data: pedidos });
   } catch (error) {
