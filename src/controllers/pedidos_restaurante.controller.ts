@@ -159,12 +159,27 @@ export async function cadastrarPedidoRestaurante(req: Request, res: Response) {
 export async function listarPedidosRestauranteLiberados(req: Request, res: Response) {
   try {
     const cod_loja = Number(req.query.cod_loja);
+    const codigo_cartao_raw = req.query.codigo_cartao;
+
     if (!cod_loja || !Number.isFinite(cod_loja)) {
       return res.status(400).json({ error: 'Parametro cod_loja e obrigatorio.' });
     }
 
+    let codigo_cartao: string | undefined;
+    if (codigo_cartao_raw !== undefined && codigo_cartao_raw !== null) {
+      const value = String(codigo_cartao_raw).trim();
+      if (!value) {
+        return res.status(400).json({ error: 'Parametro codigo_cartao invalido.' });
+      }
+      codigo_cartao = value;
+    }
+
     const pedidos = await prisma.pedido_restaurante.findMany({
-      where: { cod_loja, status: STATUS_LIBERADO },
+      where: {
+        cod_loja,
+        status: STATUS_LIBERADO,
+        ...(codigo_cartao ? { codigo_cartao } : {}),
+      },
       include: { itens: true },
       orderBy: { data_hora: 'asc' },
     });

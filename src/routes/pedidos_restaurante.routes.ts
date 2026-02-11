@@ -47,6 +47,12 @@ router.post('/cadastrar', cadastrarPedidoRestaurante);
  *         schema:
  *           type: integer
  *         description: Codigo da loja
+ *       - in: query
+ *         name: codigo_cartao
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Codigo do cartao
  *     responses:
  *       200:
  *         description: Lista de pedidos liberados
