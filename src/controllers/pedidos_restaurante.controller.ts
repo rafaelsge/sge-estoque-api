@@ -1,14 +1,26 @@
 import { prisma } from '../prismaClient';
 import { Request, Response } from 'express';
 
+const STATUS_LIBERADO = 0;
+const STATUS_PROCESSADO = 1;
+const STATUS_ALTERANDO = 2;
+const STATUS_CANCELADO = 3;
+
+const STATUS_VALIDOS = new Set([STATUS_LIBERADO, STATUS_PROCESSADO, STATUS_ALTERANDO, STATUS_CANCELADO]);
+
 export async function cadastrarPedidoRestaurante(req: Request, res: Response) {
   try {
-    const { cod_loja, cod_usuario, codigo_cartao, data_hora, origem, totais, itens } = req.body;
+    const { id, cod_loja, cod_usuario, codigo_cartao, data_hora, origem, totais, itens } = req.body;
 
     if (!cod_loja || !cod_usuario || !data_hora || !origem || !totais || !Array.isArray(itens)) {
       return res.status(400).json({
         error: 'Campos obrigatorios: cod_loja, cod_usuario, data_hora, origem, totais e itens.',
       });
+    }
+
+    const idNum = id !== undefined && id !== null ? Number(id) : null;
+    if (idNum !== null && (!Number.isFinite(idNum) || idNum <= 0)) {
+      return res.status(400).json({ error: 'id deve ser um numero valido.' });
     }
 
     const codLojaNum = Number(cod_loja);
@@ -67,6 +79,37 @@ export async function cadastrarPedidoRestaurante(req: Request, res: Response) {
     });
 
     const resultado = await prisma.$transaction(async (tx) => {
+      if (idNum !== null) {
+        const existente = await tx.pedido_restaurante.findUnique({ where: { id: idNum } });
+        if (!existente) {
+          throw { status: 404, error: 'Pedido restaurante nao encontrado.' };
+        }
+
+        const pedidoAtualizado = await tx.pedido_restaurante.update({
+          where: { id: idNum },
+          data: {
+            cod_loja: codLojaNum,
+            cod_usuario: codUsuarioNum,
+            codigo_cartao: codigo_cartao ? String(codigo_cartao) : null,
+            data_hora: dataHora,
+            origem: String(origem),
+            total_itens: totalItens,
+            total_pedido: totalPedido,
+            status: STATUS_LIBERADO,
+          },
+        });
+
+        await tx.pedido_restaurante_item.deleteMany({ where: { pedido_id: idNum } });
+        await tx.pedido_restaurante_item.createMany({
+          data: itensData.map((item) => ({
+            pedido_id: idNum,
+            ...item,
+          })),
+        });
+
+        return pedidoAtualizado;
+      }
+
       const pedido = await tx.pedido_restaurante.create({
         data: {
           cod_loja: codLojaNum,
@@ -74,6 +117,7 @@ export async function cadastrarPedidoRestaurante(req: Request, res: Response) {
           codigo_cartao: codigo_cartao ? String(codigo_cartao) : null,
           data_hora: dataHora,
           origem: String(origem),
+          status: STATUS_LIBERADO,
           total_itens: totalItens,
           total_pedido: totalPedido,
         },
@@ -90,12 +134,16 @@ export async function cadastrarPedidoRestaurante(req: Request, res: Response) {
     });
 
     return res.status(201).json({
-      message: 'Pedido restaurante cadastrado com sucesso.',
+      message: idNum ? 'Pedido restaurante atualizado com sucesso.' : 'Pedido restaurante cadastrado com sucesso.',
       id: resultado.id,
+      status: STATUS_LIBERADO,
       total_itens: totalItens,
       total_pedido: totalPedido,
     });
   } catch (error: any) {
+    if (error?.status === 404) {
+      return res.status(404).json({ error: error.error ?? 'Pedido restaurante nao encontrado.' });
+    }
     if (error?.index !== undefined) {
       return res.status(400).json({
         error: error.error ?? 'Item invalido.',
@@ -105,5 +153,63 @@ export async function cadastrarPedidoRestaurante(req: Request, res: Response) {
     }
     console.error('Erro em cadastrarPedidoRestaurante:', error);
     return res.status(500).json({ error: 'Erro ao cadastrar pedido restaurante.' });
+  }
+}
+
+export async function listarPedidosRestauranteLiberados(req: Request, res: Response) {
+  try {
+    const cod_loja = Number(req.query.cod_loja);
+    if (!cod_loja || !Number.isFinite(cod_loja)) {
+      return res.status(400).json({ error: 'Parametro cod_loja e obrigatorio.' });
+    }
+
+    const pedidos = await prisma.pedido_restaurante.findMany({
+      where: { cod_loja, status: STATUS_LIBERADO },
+      include: { itens: true },
+      orderBy: { data_hora: 'asc' },
+    });
+
+    return res.json({ total: pedidos.length, data: pedidos });
+  } catch (error) {
+    console.error('Erro em listarPedidosRestauranteLiberados:', error);
+    return res.status(500).json({ error: 'Erro ao listar pedidos liberados.' });
+  }
+}
+
+export async function atualizarStatusPedidoRestaurante(req: Request, res: Response) {
+  try {
+    const { id, status } = req.body;
+    if (!id && id !== 0) {
+      return res.status(400).json({ error: 'Campo id e obrigatorio.' });
+    }
+    if (status === undefined || status === null) {
+      return res.status(400).json({ error: 'Campo status e obrigatorio.' });
+    }
+
+    const idNum = Number(id);
+    const statusNum = Number(status);
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+      return res.status(400).json({ error: 'id deve ser um numero valido.' });
+    }
+    if (!Number.isFinite(statusNum) || !STATUS_VALIDOS.has(statusNum)) {
+      return res.status(400).json({ error: 'status deve ser 0, 1, 2 ou 3.' });
+    }
+
+    const atualizado = await prisma.pedido_restaurante.update({
+      where: { id: idNum },
+      data: { status: statusNum },
+    });
+
+    return res.json({
+      message: 'Status do pedido atualizado com sucesso.',
+      id: atualizado.id,
+      status: atualizado.status,
+    });
+  } catch (error: any) {
+    if (error?.code === 'P2025') {
+      return res.status(404).json({ error: 'Pedido restaurante nao encontrado.' });
+    }
+    console.error('Erro em atualizarStatusPedidoRestaurante:', error);
+    return res.status(500).json({ error: 'Erro ao atualizar status do pedido.' });
   }
 }

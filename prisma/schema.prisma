@@ -99,6 +99,7 @@ model pedido_restaurante {
   codigo_cartao String?
   data_hora     DateTime
   origem        String?
+  status        Int      @default(0)
   total_itens   Int
   total_pedido  Decimal  @db.Decimal(12,2)
   created_at    DateTime @default(now())
