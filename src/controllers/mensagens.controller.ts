@@ -34,7 +34,14 @@ function asNullableString(value: unknown): string | null {
 }
 
 function normalizePhone(value: unknown): string {
-  const raw = String(value ?? '').trim();
+  let raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  // JID da Evolution/WhatsApp: 5511999999999@s.whatsapp.net
+  if (raw.includes('@')) raw = raw.split('@')[0];
+  // Alguns JIDs incluem sufixo de dispositivo: 5511999999999:12@s.whatsapp.net
+  if (raw.includes(':')) raw = raw.split(':')[0];
+
   const digits = raw.replace(/\D/g, '');
   return digits;
 }
@@ -63,6 +70,41 @@ function readFirstString(...values: unknown[]): string | null {
     }
   }
   return null;
+}
+
+function extractPhoneFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.telefone,
+    payload?.numero,
+    payload?.phone,
+    payload?.from,
+    payload?.sender,
+    payload?.remoteJid,
+    payload?.remoteJidAlt,
+    payload?.jid,
+    payload?.key?.remoteJid,
+    payload?.key?.remoteJidAlt,
+    payload?.key?.participant,
+    payload?.data?.telefone,
+    payload?.data?.numero,
+    payload?.data?.phone,
+    payload?.data?.from,
+    payload?.data?.sender,
+    payload?.data?.remoteJid,
+    payload?.data?.remoteJidAlt,
+    payload?.data?.jid,
+    payload?.data?.key?.remoteJid,
+    payload?.data?.key?.remoteJidAlt,
+    payload?.data?.key?.participant,
+    payload?.event?.telefone,
+    payload?.event?.numero,
+    payload?.event?.phone,
+    payload?.event?.from,
+    payload?.event?.sender,
+    payload?.event?.remoteJid,
+    payload?.event?.key?.remoteJid,
+    payload?.event?.data?.key?.remoteJid,
+  );
 }
 
 function maskKey(value: string | null): string {
@@ -115,7 +157,8 @@ export async function webhookMensagem(req: Request, res: Response) {
         req.headers['origin'],
       ),
     );
-    const telefone = normalizePhone(req.body?.telefone ?? req.body?.numero);
+    const telefoneRaw = extractPhoneFromPayload(req.body);
+    const telefone = normalizePhone(telefoneRaw);
     const direcao = parseDirection(req.body?.direcao);
     const tipo = asNullableString(req.body?.tipo) ?? 'texto';
     const texto = asNullableString(req.body?.texto);
@@ -155,6 +198,7 @@ export async function webhookMensagem(req: Request, res: Response) {
 
     console.info('[mensagens/webhook] campos normalizados:', {
       cod_loja,
+      telefoneRaw,
       telefone,
       direcao,
       tipo,
@@ -174,7 +218,7 @@ export async function webhookMensagem(req: Request, res: Response) {
       });
     }
     if (!telefone) {
-      console.warn('[mensagens/webhook] rejeitado: telefone/numero ausente');
+      console.warn('[mensagens/webhook] rejeitado: telefone/numero ausente (incluindo key.remoteJid)');
       return res.status(400).json({ error: 'Campo telefone/numero e obrigatorio.' });
     }
     if (!direcao) {
