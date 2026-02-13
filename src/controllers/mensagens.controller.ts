@@ -4,6 +4,11 @@ import { prisma } from '../prismaClient';
 const STATUS_ABERTO = 'aberto' as const;
 const STATUS_EM_ATENDIMENTO = 'em_atendimento' as const;
 const STATUS_FINALIZADO = 'finalizado' as const;
+const STATUS_ATENDIMENTO_VALIDOS = new Set([
+  STATUS_ABERTO,
+  STATUS_EM_ATENDIMENTO,
+  STATUS_FINALIZADO,
+]);
 
 function payloadPreview(payload: unknown, max = 6000): string {
   try {
@@ -252,6 +257,13 @@ function canAccessAtendimento(atendimento: { status: string; usuario_id: number 
   if (!atendimento.usuario_id) return true;
   if (!codUsuario) return false;
   return atendimento.usuario_id === codUsuario;
+}
+
+function parseStatusAtendimento(value: unknown): typeof STATUS_ABERTO | typeof STATUS_EM_ATENDIMENTO | typeof STATUS_FINALIZADO | null {
+  const status = asNullableString(value)?.toLowerCase() ?? null;
+  if (!status) return null;
+  if (!STATUS_ATENDIMENTO_VALIDOS.has(status as any)) return null;
+  return status as any;
 }
 
 export async function webhookMensagem(req: Request, res: Response) {
@@ -699,6 +711,95 @@ export async function listarMensagensContato(req: Request, res: Response) {
   } catch (error) {
     console.error('Erro em listarMensagensContato:', error);
     return res.status(500).json({ error: 'Erro ao listar mensagens do contato.' });
+  }
+}
+
+export async function listarAtendimentos(req: Request, res: Response) {
+  try {
+    const cod_loja = asPositiveInt(req.query?.cod_loja);
+    const cod_usuario = asNullablePositiveInt(req.query?.cod_usuario);
+    const contato_id = asNullablePositiveInt(req.query?.contato_id);
+    const statusInput = asNullableString(req.query?.status);
+    const status = parseStatusAtendimento(statusInput);
+    const limit = Math.max(1, Math.min(500, Number(req.query?.limit) || 100));
+    const offset = Math.max(0, Number(req.query?.offset) || 0);
+
+    if (!cod_loja) {
+      return res.status(400).json({ error: 'Campo cod_loja e obrigatorio.' });
+    }
+    if (statusInput && !status) {
+      return res.status(400).json({ error: "Campo status deve ser 'aberto', 'em_atendimento' ou 'finalizado'." });
+    }
+
+    const where: any = {
+      cod_loja,
+      ...(contato_id ? { contato_id } : {}),
+    };
+
+    if (status === STATUS_EM_ATENDIMENTO) {
+      where.status = STATUS_EM_ATENDIMENTO;
+      where.OR = [
+        { usuario_id: null },
+        ...(cod_usuario ? [{ usuario_id: cod_usuario }] : []),
+      ];
+    } else if (status === STATUS_ABERTO || status === STATUS_FINALIZADO) {
+      where.status = status;
+    } else {
+      where.OR = [
+        { status: STATUS_ABERTO },
+        { status: STATUS_FINALIZADO },
+        {
+          status: STATUS_EM_ATENDIMENTO,
+          OR: [
+            { usuario_id: null },
+            ...(cod_usuario ? [{ usuario_id: cod_usuario }] : []),
+          ],
+        },
+      ];
+    }
+
+    const total = await prisma.atendimento.count({ where });
+    const atendimentos = await prisma.atendimento.findMany({
+      where,
+      include: {
+        contato: true,
+        _count: { select: { mensagens: true } },
+      },
+      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+      skip: offset,
+      take: limit,
+    });
+
+    return res.json({
+      total,
+      data: atendimentos.map((a) => ({
+        id: a.id,
+        cod_loja: a.cod_loja,
+        contato_id: a.contato_id,
+        cliente_codigo: a.cliente_codigo,
+        usuario_id: a.usuario_id,
+        origem: a.origem,
+        status: a.status,
+        aberto_em: a.aberto_em,
+        iniciado_em: a.iniciado_em,
+        finalizado_em: a.finalizado_em,
+        created_at: a.created_at,
+        updated_at: a.updated_at,
+        total_mensagens: a._count.mensagens,
+        contato: a.contato
+          ? {
+              id: a.contato.id,
+              contato: a.contato.contato,
+              telefone: a.contato.telefone,
+              tipo: a.contato.tipo,
+            }
+          : null,
+      })),
+      nextOffset: offset + limit < total ? offset + limit : null,
+    });
+  } catch (error) {
+    console.error('Erro em listarAtendimentos:', error);
+    return res.status(500).json({ error: 'Erro ao listar atendimentos.' });
   }
 }
 
