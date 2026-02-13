@@ -112,6 +112,78 @@ function readFirstString(...values: unknown[]): string | null {
   return null;
 }
 
+function readFirstRawString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) return value;
+    if (Array.isArray(value) && value.length > 0) {
+      const first = value[0];
+      if (typeof first === 'string' && first.length > 0) return first;
+    }
+  }
+  return null;
+}
+
+function extractMediaBase64FromPayload(payload: any): string | null {
+  return readFirstRawString(
+    payload?.base64,
+    payload?.message?.base64,
+    payload?.data?.base64,
+    payload?.data?.message?.base64,
+    payload?.event?.base64,
+    payload?.event?.message?.base64,
+
+    payload?.message?.imageMessage?.base64,
+    payload?.message?.videoMessage?.base64,
+    payload?.message?.audioMessage?.base64,
+    payload?.message?.documentMessage?.base64,
+
+    payload?.data?.message?.imageMessage?.base64,
+    payload?.data?.message?.videoMessage?.base64,
+    payload?.data?.message?.audioMessage?.base64,
+    payload?.data?.message?.documentMessage?.base64,
+
+    payload?.event?.message?.imageMessage?.base64,
+    payload?.event?.message?.videoMessage?.base64,
+    payload?.event?.message?.audioMessage?.base64,
+    payload?.event?.message?.documentMessage?.base64,
+  );
+}
+
+function extractMediaMimeTypeFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.mimetype,
+    payload?.mimeType,
+    payload?.message?.mimetype,
+    payload?.data?.mimetype,
+    payload?.data?.message?.mimetype,
+    payload?.event?.mimetype,
+    payload?.event?.message?.mimetype,
+
+    payload?.message?.imageMessage?.mimetype,
+    payload?.message?.videoMessage?.mimetype,
+    payload?.message?.audioMessage?.mimetype,
+    payload?.message?.documentMessage?.mimetype,
+
+    payload?.data?.message?.imageMessage?.mimetype,
+    payload?.data?.message?.videoMessage?.mimetype,
+    payload?.data?.message?.audioMessage?.mimetype,
+    payload?.data?.message?.documentMessage?.mimetype,
+
+    payload?.event?.message?.imageMessage?.mimetype,
+    payload?.event?.message?.videoMessage?.mimetype,
+    payload?.event?.message?.audioMessage?.mimetype,
+    payload?.event?.message?.documentMessage?.mimetype,
+  );
+}
+
+function defaultMimeTypeByTipo(tipo: string): string | null {
+  if (tipo === 'imagem') return 'image/jpeg';
+  if (tipo === 'video') return 'video/mp4';
+  if (tipo === 'audio') return 'audio/ogg';
+  if (tipo === 'documento') return 'application/octet-stream';
+  return null;
+}
+
 function extractFromMe(payload: any): boolean {
   const value =
     payload?.data?.key?.fromMe ??
@@ -225,6 +297,8 @@ export async function webhookMensagem(req: Request, res: Response) {
     const direcao = parseDirection(req.body?.direcao) ?? (fromMe ? 'saida' : 'entrada');
     const tipo = inferTipoFromPayload(req.body) ?? 'texto';
     const texto = extractTextFromPayload(req.body);
+    const arquivo_base64 = extractMediaBase64FromPayload(req.body);
+    const arquivo_mimetype = extractMediaMimeTypeFromPayload(req.body) ?? (arquivo_base64 ? defaultMimeTypeByTipo(tipo) : null);
     const contatoNome = asNullableString(req.body?.contato ?? req.body?.nome);
     const contatoTipo = asNullableString(req.body?.contato_tipo ?? req.body?.tipo_contato);
     const cliente_codigo = asNullablePositiveInt(req.body?.cliente_codigo);
@@ -272,6 +346,9 @@ export async function webhookMensagem(req: Request, res: Response) {
       usuario_id,
       origem,
       hasTexto: Boolean(texto),
+      hasArquivoBase64: Boolean(arquivo_base64),
+      arquivoMimetype: arquivo_mimetype,
+      base64Length: arquivo_base64 ? arquivo_base64.length : 0,
       hasPayload: payload !== undefined && payload !== null,
     });
 
@@ -371,6 +448,8 @@ export async function webhookMensagem(req: Request, res: Response) {
           direcao,
           tipo,
           texto,
+          arquivo_base64: arquivo_base64 ?? undefined,
+          arquivo_mimetype: arquivo_mimetype ?? undefined,
           payload: payload ?? undefined,
         },
       });
@@ -407,6 +486,10 @@ export async function enviarMensagem(req: Request, res: Response) {
     const direcao = parseDirection(req.body?.direcao ?? 'saida');
     const tipo = asNullableString(req.body?.tipo) ?? 'texto';
     const texto = asNullableString(req.body?.texto);
+    const arquivo_base64 = readFirstRawString(req.body?.arquivo_base64, req.body?.base64, req.body?.payload?.base64);
+    const arquivo_mimetype =
+      readFirstString(req.body?.arquivo_mimetype, req.body?.mimetype, req.body?.payload?.mimetype) ??
+      (arquivo_base64 ? defaultMimeTypeByTipo(tipo) : null);
     const payload = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'payload') ? req.body.payload : null;
     const iniciar_atendimento = Boolean(req.body?.iniciar_atendimento);
 
@@ -416,8 +499,8 @@ export async function enviarMensagem(req: Request, res: Response) {
     if (!direcao) {
       return res.status(400).json({ error: "Campo direcao deve ser 'entrada' ou 'saida'." });
     }
-    if (!texto && (payload === undefined || payload === null)) {
-      return res.status(400).json({ error: 'Informe texto ou payload.' });
+    if (!texto && !arquivo_base64 && (payload === undefined || payload === null)) {
+      return res.status(400).json({ error: 'Informe texto, base64 ou payload.' });
     }
 
     const resultado = await prisma.$transaction(async (tx) => {
@@ -457,6 +540,8 @@ export async function enviarMensagem(req: Request, res: Response) {
           direcao,
           tipo,
           texto,
+          arquivo_base64: arquivo_base64 ?? undefined,
+          arquivo_mimetype: arquivo_mimetype ?? undefined,
           payload: payload ?? undefined,
         },
       });
