@@ -28,6 +28,7 @@ const router = Router();
  *         description: Mensagem processada
  */
 router.post('/webhook', webhookMensagem);
+router.post(/^\/webhook(?:\/.*)?$/, webhookMensagem);
 
 /**
  * @swagger

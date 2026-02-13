@@ -54,6 +54,10 @@ function canAccessAtendimento(atendimento: { status: string; usuario_id: number 
 
 export async function webhookMensagem(req: Request, res: Response) {
   try {
+    console.info('[mensagens/webhook] requisicao recebida:', {
+      originalUrl: req.originalUrl,
+      path: req.path,
+    });
     console.info('[mensagens/webhook] payload recebido:', payloadPreview(req.body));
 
     const cod_loja = asPositiveInt(req.body?.cod_loja);
