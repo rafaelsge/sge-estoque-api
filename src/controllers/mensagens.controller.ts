@@ -52,6 +52,46 @@ function parseDirection(value: unknown): 'entrada' | 'saida' | null {
   return null;
 }
 
+function extractTextFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.texto,
+    payload?.text,
+    payload?.body,
+    payload?.message?.conversation,
+    payload?.message?.extendedTextMessage?.text,
+    payload?.message?.imageMessage?.caption,
+    payload?.message?.videoMessage?.caption,
+    payload?.data?.texto,
+    payload?.data?.text,
+    payload?.data?.body,
+    payload?.data?.message?.conversation,
+    payload?.data?.message?.extendedTextMessage?.text,
+    payload?.data?.message?.imageMessage?.caption,
+    payload?.data?.message?.videoMessage?.caption,
+    payload?.event?.texto,
+    payload?.event?.text,
+    payload?.event?.body,
+    payload?.event?.message?.conversation,
+    payload?.event?.message?.extendedTextMessage?.text,
+  );
+}
+
+function inferTipoFromPayload(payload: any): string | null {
+  const tipoInformado = asNullableString(payload?.tipo);
+  if (tipoInformado) return tipoInformado;
+
+  const messageObj = payload?.data?.message ?? payload?.message ?? payload?.event?.message;
+  if (!messageObj || typeof messageObj !== 'object') return null;
+
+  if (messageObj.conversation || messageObj.extendedTextMessage) return 'texto';
+  if (messageObj.imageMessage) return 'imagem';
+  if (messageObj.videoMessage) return 'video';
+  if (messageObj.audioMessage) return 'audio';
+  if (messageObj.documentMessage) return 'documento';
+
+  return null;
+}
+
 function normalizeUrl(value: unknown): string | null {
   const raw = asNullableString(value);
   if (!raw) return null;
@@ -72,38 +112,60 @@ function readFirstString(...values: unknown[]): string | null {
   return null;
 }
 
-function extractPhoneFromPayload(payload: any): string | null {
-  return readFirstString(
-    payload?.telefone,
-    payload?.numero,
-    payload?.phone,
-    payload?.from,
-    payload?.sender,
-    payload?.remoteJid,
-    payload?.remoteJidAlt,
-    payload?.jid,
+function extractFromMe(payload: any): boolean {
+  const value =
+    payload?.data?.key?.fromMe ??
+    payload?.key?.fromMe ??
+    payload?.data?.fromMe ??
+    payload?.fromMe ??
+    false;
+  return Boolean(value);
+}
+
+function extractPhoneFromPayload(payload: any, fromMe: boolean): string | null {
+  const remoteJid = readFirstString(
+    payload?.data?.key?.remoteJid,
     payload?.key?.remoteJid,
+    payload?.data?.remoteJid,
+    payload?.remoteJid,
+    payload?.data?.key?.remoteJidAlt,
     payload?.key?.remoteJidAlt,
+  );
+
+  const participant = readFirstString(
+    payload?.data?.key?.participant,
     payload?.key?.participant,
+    payload?.data?.participant,
+    payload?.participant,
+  );
+
+  // Conversa 1:1: o contato sempre vem no remoteJid (independente de fromMe)
+  if (remoteJid && !remoteJid.includes('@g.us')) {
+    return remoteJid;
+  }
+
+  // Grupo: quando recebida (fromMe=false), o remetente vem em participant
+  if (remoteJid && remoteJid.includes('@g.us') && !fromMe && participant) {
+    return participant;
+  }
+
+  // Fallbacks para payloads fora do padrao
+  return readFirstString(
+    // recebidas
+    !fromMe ? payload?.data?.from : null,
+    !fromMe ? payload?.from : null,
+    !fromMe ? payload?.data?.sender : null,
+    !fromMe ? payload?.sender : null,
+    // enviadas
+    fromMe ? payload?.data?.to : null,
+    fromMe ? payload?.to : null,
+    // ultimo fallback legado
     payload?.data?.telefone,
     payload?.data?.numero,
-    payload?.data?.phone,
-    payload?.data?.from,
-    payload?.data?.sender,
-    payload?.data?.remoteJid,
-    payload?.data?.remoteJidAlt,
-    payload?.data?.jid,
-    payload?.data?.key?.remoteJid,
-    payload?.data?.key?.remoteJidAlt,
-    payload?.data?.key?.participant,
-    payload?.event?.telefone,
-    payload?.event?.numero,
-    payload?.event?.phone,
-    payload?.event?.from,
-    payload?.event?.sender,
-    payload?.event?.remoteJid,
-    payload?.event?.key?.remoteJid,
-    payload?.event?.data?.key?.remoteJid,
+    payload?.telefone,
+    payload?.numero,
+    remoteJid,
+    participant,
   );
 }
 
@@ -157,11 +219,12 @@ export async function webhookMensagem(req: Request, res: Response) {
         req.headers['origin'],
       ),
     );
-    const telefoneRaw = extractPhoneFromPayload(req.body);
+    const fromMe = extractFromMe(req.body);
+    const telefoneRaw = extractPhoneFromPayload(req.body, fromMe);
     const telefone = normalizePhone(telefoneRaw);
-    const direcao = parseDirection(req.body?.direcao);
-    const tipo = asNullableString(req.body?.tipo) ?? 'texto';
-    const texto = asNullableString(req.body?.texto);
+    const direcao = parseDirection(req.body?.direcao) ?? (fromMe ? 'saida' : 'entrada');
+    const tipo = inferTipoFromPayload(req.body) ?? 'texto';
+    const texto = extractTextFromPayload(req.body);
     const contatoNome = asNullableString(req.body?.contato ?? req.body?.nome);
     const contatoTipo = asNullableString(req.body?.contato_tipo ?? req.body?.tipo_contato);
     const cliente_codigo = asNullablePositiveInt(req.body?.cliente_codigo);
@@ -198,6 +261,7 @@ export async function webhookMensagem(req: Request, res: Response) {
 
     console.info('[mensagens/webhook] campos normalizados:', {
       cod_loja,
+      fromMe,
       telefoneRaw,
       telefone,
       direcao,
