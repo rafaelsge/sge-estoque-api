@@ -92,6 +92,89 @@ model configuracao {
   valor    String?
 }
 
+model cliente {
+  id         Int      @id @default(autoincrement())
+  cod_loja   Int
+  codigo     Int?
+  nome       String
+  documento  String?  @db.VarChar(50)
+  telefone   String?  @db.VarChar(30)
+  email      String?
+  ativo      Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([cod_loja, codigo])
+  @@index([cod_loja, nome])
+}
+
+model condicao_pagamento {
+  id         Int      @id @default(autoincrement())
+  cod_loja   Int
+  codigo     Int?
+  nome       String
+  prazo_dias Int?
+  ativo      Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([cod_loja, codigo])
+  @@index([cod_loja, nome])
+}
+
+model estoque {
+  id          Int      @id @default(autoincrement())
+  cod_loja    Int
+  cod_produto Int
+  quantidade  Decimal  @db.Decimal(12,3) @default(0.000)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@unique([cod_loja, cod_produto])
+  @@index([cod_loja])
+}
+
+model pedido {
+  id                 Int          @id @default(autoincrement())
+  cod_loja           Int
+  cod_usuario        Int?
+  cod_cliente        Int?
+  tipo               String?      @db.VarChar(50)
+  cod_cond_pagto     Int?
+  valor_frete        Decimal?     @db.Decimal(12,2) @default(0.00)
+  nome_transportadora String?     @db.VarChar(120)
+  tipo_frete         String?      @db.VarChar(30)
+  total_itens        Int?
+  total_pedido       Decimal      @db.Decimal(12,2)
+  observacao         String?      @db.VarChar(500)
+  origem             String?      @db.VarChar(100)
+  status             Int          @default(0)
+  data_hora          DateTime     @default(now())
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @updatedAt
+  itens              pedido_item[]
+
+  @@index([cod_loja, data_hora])
+}
+
+model pedido_item {
+  id            Int      @id @default(autoincrement())
+  id_pedido     Int
+  cod_produto   Int
+  descricao     String?  @db.VarChar(255)
+  quantidade    Decimal  @db.Decimal(12,3)
+  pr_venda      Decimal? @db.Decimal(12,2)
+  pr_custo      Decimal? @db.Decimal(12,2)
+  subtotal      Decimal? @db.Decimal(12,2)
+  compl_item    String?  @db.VarChar(255)
+  perc_desconto Decimal? @db.Decimal(5,2)
+  vl_desconto   Decimal? @db.Decimal(12,2)
+  created_at    DateTime @default(now())
+  pedido        pedido   @relation(fields: [id_pedido], references: [id], onDelete: Cascade)
+
+  @@index([id_pedido])
+}
+
 model pedido_restaurante {
   id            Int      @id @default(autoincrement())
   cod_loja      Int

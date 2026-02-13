@@ -4,6 +4,8 @@ import { Express } from 'express';
 import path from 'path';
 
 export function setupSwagger(app: Express) {
+  const isDist = path.basename(__dirname).toLowerCase() === 'dist';
+
   const options = {
     definition: {
       openapi: '3.0.0',
@@ -27,10 +29,7 @@ Permite login de usuários, sincronização de contagens e atualização de prod
       ],
     },
     // Suporta execução via ts-node (src) e build (dist)
-    apis: [
-      path.join(__dirname, 'routes', '*.ts'),
-      path.join(__dirname, 'routes', '*.js'),
-    ],
+    apis: [path.join(__dirname, 'routes', isDist ? '*.js' : '*.ts')],
   };
 
   const swaggerSpec = swaggerJSDoc(options);

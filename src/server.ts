@@ -12,6 +12,10 @@ import usuariosRoutes from './routes/usuarios.routes';
 import validadeRoutes from './routes/validade.routes';
 import configuracaoRoutes from './routes/configuracao.routes';
 import pedidosRestauranteRoutes from './routes/pedidos_restaurante.routes';
+import clientesRoutes from './routes/clientes.routes';
+import condicaoPagamentoRoutes from './routes/condicao_pagamento.routes';
+import estoqueRoutes from './routes/estoque.routes';
+import pedidosRoutes from './routes/pedidos.routes';
 import { setupSwagger } from './swagger'; // 
 
 const app = express();
@@ -28,6 +32,11 @@ app.use('/usuarios', usuariosRoutes);
 app.use('/validade', validadeRoutes);
 app.use('/configuracao', configuracaoRoutes);
 app.use('/pedidos/restaurante', pedidosRestauranteRoutes);
+app.use('/clientes', clientesRoutes);
+app.use('/condicao-pagamento', condicaoPagamentoRoutes);
+app.use('/condpag', condicaoPagamentoRoutes);
+app.use('/estoque', estoqueRoutes);
+app.use('/pedidos', pedidosRoutes);
 
 setupSwagger(app); // 👈 ativa o Swagger em /api-docs
 
