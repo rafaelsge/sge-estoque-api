@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { buscarPorNome } from '../controllers/clientes.controller';
+import { buscarPorNome, cadastrarCliente } from '../controllers/clientes.controller';
 
 const router = Router();
 
@@ -32,5 +32,29 @@ const router = Router();
  *         description: Lista de clientes
  */
 router.get('/search', buscarPorNome);
+
+/**
+ * @swagger
+ * /clientes/cadastrar:
+ *   post:
+ *     summary: Cadastra um ou varios clientes
+ *     tags: [Clientes]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - type: object
+ *               - type: array
+ *                 items:
+ *                   type: object
+ *     responses:
+ *       201:
+ *         description: Clientes processados com sucesso
+ *       400:
+ *         description: Dados invalidos
+ */
+router.post('/cadastrar', cadastrarCliente);
 
 export default router;

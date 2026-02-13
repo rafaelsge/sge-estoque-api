@@ -1,5 +1,9 @@
 import { Router } from 'express';
-import { listar, obter } from '../controllers/condicao_pagamento.controller';
+import {
+  listar,
+  obter,
+  cadastrarCondicaoPagamento,
+} from '../controllers/condicao_pagamento.controller';
 
 const router = Router();
 
@@ -47,5 +51,29 @@ router.get('/', listar);
  *         description: Condicao nao encontrada
  */
 router.get('/:id', obter);
+
+/**
+ * @swagger
+ * /condicao-pagamento/cadastrar:
+ *   post:
+ *     summary: Cadastra uma ou varias condicoes de pagamento
+ *     tags: [CondicaoPagamento]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - type: object
+ *               - type: array
+ *                 items:
+ *                   type: object
+ *     responses:
+ *       201:
+ *         description: Condicoes processadas com sucesso
+ *       400:
+ *         description: Dados invalidos
+ */
+router.post('/cadastrar', cadastrarCondicaoPagamento);
 
 export default router;

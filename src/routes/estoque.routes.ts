@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getEstoqueAtual, getEstoque } from '../controllers/estoque.controller';
+import { getEstoqueAtual, getEstoque, cadastrarEstoque } from '../controllers/estoque.controller';
 
 const router = Router();
 
@@ -55,5 +55,29 @@ router.get('/atual', getEstoqueAtual);
  *         description: Lista de estoque
  */
 router.get('/', getEstoque);
+
+/**
+ * @swagger
+ * /estoque/cadastrar:
+ *   post:
+ *     summary: Cadastra ou atualiza um ou varios registros de estoque
+ *     tags: [Estoque]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             oneOf:
+ *               - type: object
+ *               - type: array
+ *                 items:
+ *                   type: object
+ *     responses:
+ *       201:
+ *         description: Estoque processado com sucesso
+ *       400:
+ *         description: Dados invalidos
+ */
+router.post('/cadastrar', cadastrarEstoque);
 
 export default router;
