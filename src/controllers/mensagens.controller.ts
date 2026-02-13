@@ -45,6 +45,32 @@ function parseDirection(value: unknown): 'entrada' | 'saida' | null {
   return null;
 }
 
+function normalizeUrl(value: unknown): string | null {
+  const raw = asNullableString(value);
+  if (!raw) return null;
+  return raw.replace(/\/+$/, '').toLowerCase();
+}
+
+function readFirstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+    if (Array.isArray(value) && value.length > 0) {
+      const first = value[0];
+      if (typeof first === 'string' && first.trim()) return first.trim();
+    }
+  }
+  return null;
+}
+
+function maskKey(value: string | null): string {
+  if (!value) return '';
+  if (value.length <= 8) return '***';
+  return `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
 function canAccessAtendimento(atendimento: { status: string; usuario_id: number | null }, codUsuario: number | null): boolean {
   if (atendimento.status !== STATUS_EM_ATENDIMENTO) return true;
   if (!atendimento.usuario_id) return true;
@@ -60,7 +86,35 @@ export async function webhookMensagem(req: Request, res: Response) {
     });
     console.info('[mensagens/webhook] payload recebido:', payloadPreview(req.body));
 
-    const cod_loja = asPositiveInt(req.body?.cod_loja);
+    const cod_loja_payload = asPositiveInt(req.body?.cod_loja);
+    const apikey = readFirstString(
+      req.body?.apikey,
+      req.body?.apiKey,
+      req.body?.api_key,
+      req.body?.data?.apikey,
+      req.body?.event?.apikey,
+      req.headers['apikey'],
+      req.headers['x-api-key'],
+    );
+    const evolution_instancia = readFirstString(
+      req.body?.instance,
+      req.body?.instanceName,
+      req.body?.instance_name,
+      req.body?.instancia,
+      req.body?.data?.instance,
+      req.body?.data?.instanceName,
+      req.body?.event?.instance,
+    );
+    const evolution_url = normalizeUrl(
+      readFirstString(
+        req.body?.server_url,
+        req.body?.serverUrl,
+        req.body?.evolution_url,
+        req.body?.data?.server_url,
+        req.body?.event?.server_url,
+        req.headers['origin'],
+      ),
+    );
     const telefone = normalizePhone(req.body?.telefone ?? req.body?.numero);
     const direcao = parseDirection(req.body?.direcao);
     const tipo = asNullableString(req.body?.tipo) ?? 'texto';
@@ -71,6 +125,33 @@ export async function webhookMensagem(req: Request, res: Response) {
     const usuario_id = asNullablePositiveInt(req.body?.usuario_id);
     const origem = asNullableString(req.body?.origem) ?? 'whatsapp';
     const payload = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'payload') ? req.body.payload : req.body;
+
+    let lojaResolvida = null as { codigo: number } | null;
+    if (apikey) {
+      lojaResolvida = await prisma.loja.findFirst({
+        where: { evolution_apikey: apikey },
+        select: { codigo: true },
+      });
+    }
+    if (!lojaResolvida && evolution_instancia) {
+      const whereByInstancia: any = { evolution_instancia };
+      if (evolution_url) whereByInstancia.evolution_url = evolution_url;
+      lojaResolvida = await prisma.loja.findFirst({
+        where: whereByInstancia,
+        select: { codigo: true },
+      });
+    }
+
+    const cod_loja = lojaResolvida?.codigo ?? cod_loja_payload;
+
+    console.info('[mensagens/webhook] resolucao da loja:', {
+      cod_loja_payload,
+      cod_loja_resolvida: lojaResolvida?.codigo ?? null,
+      cod_loja_final: cod_loja ?? null,
+      apikey: maskKey(apikey),
+      evolution_instancia,
+      evolution_url,
+    });
 
     console.info('[mensagens/webhook] campos normalizados:', {
       cod_loja,
@@ -87,8 +168,10 @@ export async function webhookMensagem(req: Request, res: Response) {
     });
 
     if (!cod_loja) {
-      console.warn('[mensagens/webhook] rejeitado: cod_loja ausente/invalido');
-      return res.status(400).json({ error: 'Campo cod_loja e obrigatorio.' });
+      console.warn('[mensagens/webhook] rejeitado: nao foi possivel identificar cod_loja por apikey/instancia/url');
+      return res.status(400).json({
+        error: 'Nao foi possivel identificar cod_loja. Configure evolution_apikey/evolution_instancia/evolution_url na loja.',
+      });
     }
     if (!telefone) {
       console.warn('[mensagens/webhook] rejeitado: telefone/numero ausente');

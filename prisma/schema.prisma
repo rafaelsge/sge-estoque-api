@@ -19,12 +19,15 @@ enum direcao_mensagem {
 }
 
 model loja {
-  id       Int       @id @default(autoincrement())
-  codigo   Int       @unique
-  nome     String
-  cidade   String
-  usuarios usuario[]
-  produtos produto[]
+  id                 Int       @id @default(autoincrement())
+  codigo             Int       @unique
+  nome               String
+  cidade             String
+  evolution_url      String?   @db.VarChar(255)
+  evolution_instancia String?  @db.VarChar(100)
+  evolution_apikey   String?   @unique @db.VarChar(255)
+  usuarios           usuario[]
+  produtos           produto[]
 }
 
 model usuario {

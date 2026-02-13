@@ -66,9 +66,15 @@ router.get('/', listarLojas);
  *                 - codigo: 3
  *                   nome: "Loja Centro Porto Alegre"
  *                   cidade: "Porto Alegre"
+ *                   evolution_url: "https://evolution.suaempresa.com"
+ *                   evolution_instancia: "loja3"
+ *                   evolution_apikey: "apikey-loja-3"
  *                 - codigo: 4
  *                   nome: "Loja 10 Porto Alegre"
  *                   cidade: "Porto Alegre"
+ *                   evolution_url: "https://evolution.suaempresa.com"
+ *                   evolution_instancia: "loja4"
+ *                   evolution_apikey: "apikey-loja-4"
  *     responses:
  *       201:
  *         description: Loja(s) cadastrada(s) com sucesso
@@ -103,6 +109,15 @@ router.post('/cadastrar', cadastrarLoja);
  *               cidade:
  *                 type: string
  *                 example: "Porto Alegre"
+ *               evolution_url:
+ *                 type: string
+ *                 example: "https://evolution.suaempresa.com"
+ *               evolution_instancia:
+ *                 type: string
+ *                 example: "loja3"
+ *               evolution_apikey:
+ *                 type: string
+ *                 example: "apikey-loja-3"
  *     responses:
  *       200:
  *         description: Loja atualizada com sucesso
@@ -153,6 +168,18 @@ export default router;
  *         cidade:
  *           type: string
  *           example: "Porto Alegre"
+ *         evolution_url:
+ *           type: string
+ *           nullable: true
+ *           example: "https://evolution.suaempresa.com"
+ *         evolution_instancia:
+ *           type: string
+ *           nullable: true
+ *           example: "loja3"
+ *         evolution_apikey:
+ *           type: string
+ *           nullable: true
+ *           example: "apikey-loja-3"
  *
  *     LojaInput:
  *       type: object
@@ -170,4 +197,16 @@ export default router;
  *         cidade:
  *           type: string
  *           example: "Porto Alegre"
+ *         evolution_url:
+ *           type: string
+ *           nullable: true
+ *           example: "https://evolution.suaempresa.com"
+ *         evolution_instancia:
+ *           type: string
+ *           nullable: true
+ *           example: "loja3"
+ *         evolution_apikey:
+ *           type: string
+ *           nullable: true
+ *           example: "apikey-loja-3"
  */
