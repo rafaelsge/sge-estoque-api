@@ -366,9 +366,12 @@ export async function webhookMensagem(req: Request, res: Response) {
       console.warn('[mensagens/webhook] rejeitado: direcao invalida');
       return res.status(400).json({ error: "Campo direcao deve ser 'entrada' ou 'saida'." });
     }
-    if (!texto && (payload === undefined || payload === null)) {
-      console.warn('[mensagens/webhook] rejeitado: texto/payload ausentes');
-      return res.status(400).json({ error: 'Informe texto ou payload.' });
+    if (!texto && !arquivo_base64) {
+      console.info('[mensagens/webhook] ignorado: sem texto e sem arquivo_base64');
+      return res.status(200).json({
+        message: 'Evento ignorado: sem texto e sem arquivo_base64.',
+        ignored: true,
+      });
     }
 
     const resultado = await prisma.$transaction(async (tx) => {
@@ -445,6 +448,7 @@ export async function webhookMensagem(req: Request, res: Response) {
           atendimento_id: atendimento.id,
           contato_id: contato.id,
           usuario_id,
+          from_me: fromMe,
           direcao,
           tipo,
           texto,
@@ -486,6 +490,9 @@ export async function enviarMensagem(req: Request, res: Response) {
     const direcao = parseDirection(req.body?.direcao ?? 'saida');
     const tipo = asNullableString(req.body?.tipo) ?? 'texto';
     const texto = asNullableString(req.body?.texto);
+    const from_me = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'fromMe')
+      ? Boolean(req.body.fromMe)
+      : direcao === 'saida';
     const arquivo_base64 = readFirstRawString(req.body?.arquivo_base64, req.body?.base64, req.body?.payload?.base64);
     const arquivo_mimetype =
       readFirstString(req.body?.arquivo_mimetype, req.body?.mimetype, req.body?.payload?.mimetype) ??
@@ -499,8 +506,8 @@ export async function enviarMensagem(req: Request, res: Response) {
     if (!direcao) {
       return res.status(400).json({ error: "Campo direcao deve ser 'entrada' ou 'saida'." });
     }
-    if (!texto && !arquivo_base64 && (payload === undefined || payload === null)) {
-      return res.status(400).json({ error: 'Informe texto, base64 ou payload.' });
+    if (!texto && !arquivo_base64) {
+      return res.status(400).json({ error: 'Informe texto ou arquivo_base64.' });
     }
 
     const resultado = await prisma.$transaction(async (tx) => {
@@ -537,6 +544,7 @@ export async function enviarMensagem(req: Request, res: Response) {
           atendimento_id: atendimento.id,
           contato_id: atendimento.contato_id,
           usuario_id,
+          from_me,
           direcao,
           tipo,
           texto,

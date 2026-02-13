@@ -246,6 +246,7 @@ model mensagem {
   atendimento_id Int
   contato_id    Int
   usuario_id    Int?
+  from_me       Boolean          @default(false)
   direcao       direcao_mensagem
   tipo          String           @default("texto") @db.VarChar(30)
   texto         String?          @db.LongText
