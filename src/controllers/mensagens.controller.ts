@@ -5,6 +5,17 @@ const STATUS_ABERTO = 'aberto' as const;
 const STATUS_EM_ATENDIMENTO = 'em_atendimento' as const;
 const STATUS_FINALIZADO = 'finalizado' as const;
 
+function payloadPreview(payload: unknown, max = 6000): string {
+  try {
+    const raw = JSON.stringify(payload);
+    if (!raw) return '';
+    if (raw.length <= max) return raw;
+    return `${raw.slice(0, max)}... [truncado ${raw.length - max} chars]`;
+  } catch {
+    return '[payload nao serializavel]';
+  }
+}
+
 function asPositiveInt(value: unknown): number | null {
   const n = Number(value);
   if (!Number.isInteger(n) || n <= 0) return null;
@@ -43,6 +54,8 @@ function canAccessAtendimento(atendimento: { status: string; usuario_id: number 
 
 export async function webhookMensagem(req: Request, res: Response) {
   try {
+    console.info('[mensagens/webhook] payload recebido:', payloadPreview(req.body));
+
     const cod_loja = asPositiveInt(req.body?.cod_loja);
     const telefone = normalizePhone(req.body?.telefone ?? req.body?.numero);
     const direcao = parseDirection(req.body?.direcao);
@@ -55,25 +68,45 @@ export async function webhookMensagem(req: Request, res: Response) {
     const origem = asNullableString(req.body?.origem) ?? 'whatsapp';
     const payload = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'payload') ? req.body.payload : req.body;
 
+    console.info('[mensagens/webhook] campos normalizados:', {
+      cod_loja,
+      telefone,
+      direcao,
+      tipo,
+      contatoNome,
+      contatoTipo,
+      cliente_codigo,
+      usuario_id,
+      origem,
+      hasTexto: Boolean(texto),
+      hasPayload: payload !== undefined && payload !== null,
+    });
+
     if (!cod_loja) {
+      console.warn('[mensagens/webhook] rejeitado: cod_loja ausente/invalido');
       return res.status(400).json({ error: 'Campo cod_loja e obrigatorio.' });
     }
     if (!telefone) {
+      console.warn('[mensagens/webhook] rejeitado: telefone/numero ausente');
       return res.status(400).json({ error: 'Campo telefone/numero e obrigatorio.' });
     }
     if (!direcao) {
+      console.warn('[mensagens/webhook] rejeitado: direcao invalida');
       return res.status(400).json({ error: "Campo direcao deve ser 'entrada' ou 'saida'." });
     }
     if (!texto && (payload === undefined || payload === null)) {
+      console.warn('[mensagens/webhook] rejeitado: texto/payload ausentes');
       return res.status(400).json({ error: 'Informe texto ou payload.' });
     }
 
     const resultado = await prisma.$transaction(async (tx) => {
+      console.info('[mensagens/webhook] iniciando transacao', { cod_loja, telefone });
       let contato = await tx.contato.findUnique({
         where: { cod_loja_telefone: { cod_loja, telefone } },
       });
 
       if (!contato) {
+        console.info('[mensagens/webhook] contato nao encontrado, criando', { cod_loja, telefone });
         contato = await tx.contato.create({
           data: {
             cod_loja,
@@ -84,11 +117,16 @@ export async function webhookMensagem(req: Request, res: Response) {
           },
         });
       } else {
+        console.info('[mensagens/webhook] contato existente encontrado', {
+          contato_id: contato.id,
+          cliente_codigo_atual: contato.cliente_codigo,
+        });
         const updateData: any = {};
         if (contatoNome && contatoNome !== contato.contato) updateData.contato = contatoNome;
         if (contatoTipo && contatoTipo !== contato.tipo) updateData.tipo = contatoTipo;
         if (cliente_codigo && cliente_codigo !== contato.cliente_codigo) updateData.cliente_codigo = cliente_codigo;
         if (Object.keys(updateData).length > 0) {
+          console.info('[mensagens/webhook] atualizando contato', { contato_id: contato.id, updateData });
           contato = await tx.contato.update({
             where: { id: contato.id },
             data: updateData,
@@ -107,6 +145,10 @@ export async function webhookMensagem(req: Request, res: Response) {
 
       let novo_atendimento = false;
       if (!atendimento) {
+        console.info('[mensagens/webhook] atendimento aberto nao encontrado, criando', {
+          cod_loja,
+          contato_id: contato.id,
+        });
         atendimento = await tx.atendimento.create({
           data: {
             cod_loja,
@@ -117,6 +159,12 @@ export async function webhookMensagem(req: Request, res: Response) {
           },
         });
         novo_atendimento = true;
+      } else {
+        console.info('[mensagens/webhook] reutilizando atendimento aberto', {
+          atendimento_id: atendimento.id,
+          status: atendimento.status,
+          usuario_id: atendimento.usuario_id,
+        });
       }
 
       const mensagem = await tx.mensagem.create({
@@ -132,6 +180,12 @@ export async function webhookMensagem(req: Request, res: Response) {
         },
       });
 
+      console.info('[mensagens/webhook] mensagem registrada', {
+        mensagem_id: mensagem.id,
+        atendimento_id: atendimento.id,
+        contato_id: contato.id,
+      });
+
       return {
         atendimento_id: atendimento.id,
         mensagem_id: mensagem.id,
@@ -145,7 +199,7 @@ export async function webhookMensagem(req: Request, res: Response) {
       ...resultado,
     });
   } catch (error) {
-    console.error('Erro em webhookMensagem:', error);
+    console.error('[mensagens/webhook] erro:', error);
     return res.status(500).json({ error: 'Erro ao processar mensagem.' });
   }
 }
