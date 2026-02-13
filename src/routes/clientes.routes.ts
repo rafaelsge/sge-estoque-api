@@ -51,7 +51,17 @@ const router = Router();
  *                       cod_loja: 1
  *                       codigo: 2001
  *                       nome: "Mercadinho Central"
- *                       documento: "12345678000199"
+ *                       fantasia: "Mercadinho"
+ *                       tipo: "juridica"
+ *                       cpf_cnpj: "12345678000199"
+ *                       ie: "123456789"
+ *                       endereco: "Rua das Flores"
+ *                       numero: "100"
+ *                       bairro: "Centro"
+ *                       cep: "01001000"
+ *                       cod_municipio: 3550308
+ *                       municipio: "Sao Paulo"
+ *                       complemento: "Sala 3"
  *                       telefone: "11999990000"
  *                       email: "compras@mercadinho.com"
  *                       ativo: true
@@ -81,7 +91,17 @@ router.get('/search', buscarPorNome);
  *                 cod_loja: 1
  *                 codigo: 2001
  *                 nome: "Mercadinho Central"
- *                 documento: "12345678000199"
+ *                 fantasia: "Mercadinho"
+ *                 tipo: "juridica"
+ *                 cpf_cnpj: "12345678000199"
+ *                 ie: "123456789"
+ *                 endereco: "Rua das Flores"
+ *                 numero: "100"
+ *                 bairro: "Centro"
+ *                 cep: "01001000"
+ *                 cod_municipio: 3550308
+ *                 municipio: "Sao Paulo"
+ *                 complemento: "Sala 3"
  *                 telefone: "11999990000"
  *                 email: "compras@mercadinho.com"
  *                 ativo: true
@@ -91,10 +111,14 @@ router.get('/search', buscarPorNome);
  *                 - cod_loja: 1
  *                   codigo: 2001
  *                   nome: "Mercadinho Central"
+ *                   tipo: "juridica"
+ *                   cpf_cnpj: "12345678000199"
  *                   ativo: true
  *                 - cod_loja: 1
  *                   codigo: 2002
- *                   nome: "Padaria Nova Era"
+ *                   nome: "Joao da Silva"
+ *                   tipo: "fisica"
+ *                   cpf_cnpj: "12345678901"
  *                   ativo: true
  *     responses:
  *       201:
@@ -143,10 +167,51 @@ export default router;
  *         nome:
  *           type: string
  *           example: "Mercadinho Central"
- *         documento:
+ *         fantasia:
+ *           type: string
+ *           nullable: true
+ *           example: "Mercadinho"
+ *         tipo:
+ *           type: string
+ *           nullable: true
+ *           enum: [fisica, juridica]
+ *           example: "juridica"
+ *         cpf_cnpj:
  *           type: string
  *           nullable: true
  *           example: "12345678000199"
+ *         ie:
+ *           type: string
+ *           nullable: true
+ *           example: "123456789"
+ *         endereco:
+ *           type: string
+ *           nullable: true
+ *           example: "Rua das Flores"
+ *         numero:
+ *           type: string
+ *           nullable: true
+ *           example: "100"
+ *         bairro:
+ *           type: string
+ *           nullable: true
+ *           example: "Centro"
+ *         cep:
+ *           type: string
+ *           nullable: true
+ *           example: "01001000"
+ *         cod_municipio:
+ *           type: integer
+ *           nullable: true
+ *           example: 3550308
+ *         municipio:
+ *           type: string
+ *           nullable: true
+ *           example: "Sao Paulo"
+ *         complemento:
+ *           type: string
+ *           nullable: true
+ *           example: "Sala 3"
  *         telefone:
  *           type: string
  *           nullable: true
@@ -174,10 +239,51 @@ export default router;
  *         nome:
  *           type: string
  *           example: "Mercadinho Central"
- *         documento:
+ *         fantasia:
+ *           type: string
+ *           nullable: true
+ *           example: "Mercadinho"
+ *         tipo:
+ *           type: string
+ *           nullable: true
+ *           enum: [fisica, juridica]
+ *           example: "juridica"
+ *         cpf_cnpj:
  *           type: string
  *           nullable: true
  *           example: "12345678000199"
+ *         ie:
+ *           type: string
+ *           nullable: true
+ *           example: "123456789"
+ *         endereco:
+ *           type: string
+ *           nullable: true
+ *           example: "Rua das Flores"
+ *         numero:
+ *           type: string
+ *           nullable: true
+ *           example: "100"
+ *         bairro:
+ *           type: string
+ *           nullable: true
+ *           example: "Centro"
+ *         cep:
+ *           type: string
+ *           nullable: true
+ *           example: "01001000"
+ *         cod_municipio:
+ *           type: integer
+ *           nullable: true
+ *           example: 3550308
+ *         municipio:
+ *           type: string
+ *           nullable: true
+ *           example: "Sao Paulo"
+ *         complemento:
+ *           type: string
+ *           nullable: true
+ *           example: "Sala 3"
  *         telefone:
  *           type: string
  *           nullable: true

@@ -93,16 +93,26 @@ model configuracao {
 }
 
 model cliente {
-  id         Int      @id @default(autoincrement())
-  cod_loja   Int
-  codigo     Int?
-  nome       String
-  documento  String?  @db.VarChar(50)
-  telefone   String?  @db.VarChar(30)
-  email      String?
-  ativo      Boolean  @default(true)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  id            Int      @id @default(autoincrement())
+  cod_loja      Int
+  codigo        Int?
+  nome          String
+  fantasia      String?
+  tipo          String?  @db.VarChar(20)
+  cpf_cnpj      String?  @db.VarChar(50)
+  ie            String?  @db.VarChar(50)
+  endereco      String?
+  numero        String?  @db.VarChar(20)
+  bairro        String?  @db.VarChar(100)
+  cep           String?  @db.VarChar(20)
+  cod_municipio Int?
+  municipio     String?  @db.VarChar(120)
+  complemento   String?  @db.VarChar(120)
+  telefone      String?  @db.VarChar(30)
+  email         String?
+  ativo         Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 
   @@unique([cod_loja, codigo])
   @@index([cod_loja, nome])
