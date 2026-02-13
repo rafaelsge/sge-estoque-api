@@ -16,6 +16,7 @@ import clientesRoutes from './routes/clientes.routes';
 import condicaoPagamentoRoutes from './routes/condicao_pagamento.routes';
 import estoqueRoutes from './routes/estoque.routes';
 import pedidosRoutes from './routes/pedidos.routes';
+import mensagensRoutes from './routes/mensagens.routes';
 import { setupSwagger } from './swagger'; // 
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/condicao-pagamento', condicaoPagamentoRoutes);
 app.use('/condpag', condicaoPagamentoRoutes);
 app.use('/estoque', estoqueRoutes);
 app.use('/pedidos', pedidosRoutes);
+app.use('/mensagens', mensagensRoutes);
 
 setupSwagger(app); // 👈 ativa o Swagger em /api-docs
 

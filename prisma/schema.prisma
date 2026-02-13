@@ -7,6 +7,17 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum status_atendimento {
+  aberto
+  em_atendimento
+  finalizado
+}
+
+enum direcao_mensagem {
+  entrada
+  saida
+}
+
 model loja {
   id       Int       @id @default(autoincrement())
   codigo   Int       @unique
@@ -183,6 +194,67 @@ model pedido_item {
   pedido        pedido   @relation(fields: [id_pedido], references: [id], onDelete: Cascade)
 
   @@index([id_pedido])
+}
+
+model contato {
+  id            Int      @id @default(autoincrement())
+  cod_loja      Int
+  cliente_codigo Int?
+  contato       String   @db.VarChar(100)
+  telefone      String   @db.VarChar(50)
+  tipo          String?  @db.VarChar(20)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  atendimentos  atendimento[]
+  mensagens     mensagem[]
+
+  @@unique([id, cod_loja])
+  @@unique([cod_loja, telefone])
+  @@index([cod_loja, cliente_codigo])
+  @@map("contatos")
+}
+
+model atendimento {
+  id            Int                @id @default(autoincrement())
+  cod_loja      Int
+  contato_id    Int
+  cliente_codigo Int?
+  usuario_id    Int?
+  origem        String             @default("whatsapp") @db.VarChar(50)
+  status        status_atendimento @default(aberto)
+  aberto_em     DateTime           @default(now())
+  iniciado_em   DateTime?
+  finalizado_em DateTime?
+  created_at    DateTime           @default(now())
+  updated_at    DateTime           @updatedAt
+  contato       contato            @relation(fields: [contato_id, cod_loja], references: [id, cod_loja], onDelete: Restrict)
+  mensagens     mensagem[]
+
+  @@unique([id, cod_loja])
+  @@index([cod_loja, status])
+  @@index([cod_loja, contato_id, status])
+  @@index([cod_loja, usuario_id, status])
+  @@map("atendimentos")
+}
+
+model mensagem {
+  id            Int              @id @default(autoincrement())
+  cod_loja      Int
+  atendimento_id Int
+  contato_id    Int
+  usuario_id    Int?
+  direcao       direcao_mensagem
+  tipo          String           @default("texto") @db.VarChar(30)
+  texto         String?          @db.LongText
+  payload       Json?
+  criado_em     DateTime         @default(now())
+  atendimento   atendimento      @relation(fields: [atendimento_id, cod_loja], references: [id, cod_loja], onDelete: Cascade)
+  contato       contato          @relation(fields: [contato_id, cod_loja], references: [id, cod_loja], onDelete: Restrict)
+
+  @@index([cod_loja, atendimento_id])
+  @@index([cod_loja, contato_id])
+  @@index([cod_loja, criado_em])
+  @@map("mensagens")
 }
 
 model pedido_restaurante {
