@@ -128,6 +128,40 @@ function readFirstRawString(...values: unknown[]): string | null {
   return null;
 }
 
+function extractMimeFromDataUrl(base64Raw: string | null): string | null {
+  if (!base64Raw) return null;
+  const match = /^data:([^;]+);base64,/i.exec(base64Raw);
+  return match?.[1]?.trim() || null;
+}
+
+function normalizeSearchKey(key: string): string {
+  return key.replace(/[_\-\s]/g, '').toLowerCase();
+}
+
+function deepFindStringByKeys(input: unknown, keys: Set<string>, maxDepth = 10, depth = 0): string | null {
+  if (depth > maxDepth || input === null || input === undefined) return null;
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      const found = deepFindStringByKeys(item, keys, maxDepth, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (typeof input !== 'object') return null;
+
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (keys.has(normalizeSearchKey(key)) && typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+    const found = deepFindStringByKeys(value, keys, maxDepth, depth + 1);
+    if (found) return found;
+  }
+
+  return null;
+}
+
 function extractMediaBase64FromPayload(payload: any): string | null {
   return readFirstRawString(
     payload?.base64,
@@ -154,31 +188,64 @@ function extractMediaBase64FromPayload(payload: any): string | null {
   );
 }
 
-function extractMediaMimeTypeFromPayload(payload: any): string | null {
-  return readFirstString(
+function extractMediaMimeTypeFromPayload(payload: any, arquivoBase64: string | null): string | null {
+  const explicit = readFirstString(
     payload?.mimetype,
     payload?.mimeType,
+    payload?.mime_type,
+    payload?.payload?.mimetype,
+    payload?.payload?.mimeType,
+    payload?.payload?.mime_type,
     payload?.message?.mimetype,
+    payload?.message?.mimeType,
+    payload?.message?.mime_type,
     payload?.data?.mimetype,
+    payload?.data?.mimeType,
+    payload?.data?.mime_type,
     payload?.data?.message?.mimetype,
+    payload?.data?.message?.mimeType,
+    payload?.data?.message?.mime_type,
     payload?.event?.mimetype,
+    payload?.event?.mimeType,
+    payload?.event?.mime_type,
     payload?.event?.message?.mimetype,
+    payload?.event?.message?.mimeType,
+    payload?.event?.message?.mime_type,
 
     payload?.message?.imageMessage?.mimetype,
+    payload?.message?.imageMessage?.mimeType,
     payload?.message?.videoMessage?.mimetype,
+    payload?.message?.videoMessage?.mimeType,
     payload?.message?.audioMessage?.mimetype,
+    payload?.message?.audioMessage?.mimeType,
     payload?.message?.documentMessage?.mimetype,
+    payload?.message?.documentMessage?.mimeType,
 
     payload?.data?.message?.imageMessage?.mimetype,
+    payload?.data?.message?.imageMessage?.mimeType,
     payload?.data?.message?.videoMessage?.mimetype,
+    payload?.data?.message?.videoMessage?.mimeType,
     payload?.data?.message?.audioMessage?.mimetype,
+    payload?.data?.message?.audioMessage?.mimeType,
     payload?.data?.message?.documentMessage?.mimetype,
+    payload?.data?.message?.documentMessage?.mimeType,
 
     payload?.event?.message?.imageMessage?.mimetype,
+    payload?.event?.message?.imageMessage?.mimeType,
     payload?.event?.message?.videoMessage?.mimetype,
+    payload?.event?.message?.videoMessage?.mimeType,
     payload?.event?.message?.audioMessage?.mimetype,
+    payload?.event?.message?.audioMessage?.mimeType,
     payload?.event?.message?.documentMessage?.mimetype,
+    payload?.event?.message?.documentMessage?.mimeType,
   );
+
+  if (explicit) return explicit;
+
+  const deep = deepFindStringByKeys(payload, new Set(['mimetype', 'filemimetype', 'mediamimetype']));
+  if (deep) return deep;
+
+  return extractMimeFromDataUrl(arquivoBase64);
 }
 
 function defaultMimeTypeByTipo(tipo: string): string | null {
@@ -310,7 +377,9 @@ export async function webhookMensagem(req: Request, res: Response) {
     const tipo = inferTipoFromPayload(req.body) ?? 'texto';
     const texto = extractTextFromPayload(req.body);
     const arquivo_base64 = extractMediaBase64FromPayload(req.body);
-    const arquivo_mimetype = extractMediaMimeTypeFromPayload(req.body) ?? (arquivo_base64 ? defaultMimeTypeByTipo(tipo) : null);
+    const arquivo_mimetype =
+      extractMediaMimeTypeFromPayload(req.body, arquivo_base64) ??
+      (arquivo_base64 ? defaultMimeTypeByTipo(tipo) ?? 'application/octet-stream' : null);
     const contatoNome = asNullableString(req.body?.contato ?? req.body?.nome);
     const contatoTipo = asNullableString(req.body?.contato_tipo ?? req.body?.tipo_contato);
     const cliente_codigo = asNullablePositiveInt(req.body?.cliente_codigo);
@@ -508,7 +577,8 @@ export async function enviarMensagem(req: Request, res: Response) {
     const arquivo_base64 = readFirstRawString(req.body?.arquivo_base64, req.body?.base64, req.body?.payload?.base64);
     const arquivo_mimetype =
       readFirstString(req.body?.arquivo_mimetype, req.body?.mimetype, req.body?.payload?.mimetype) ??
-      (arquivo_base64 ? defaultMimeTypeByTipo(tipo) : null);
+      extractMediaMimeTypeFromPayload(req.body, arquivo_base64) ??
+      (arquivo_base64 ? defaultMimeTypeByTipo(tipo) ?? 'application/octet-stream' : null);
     const payload = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'payload') ? req.body.payload : null;
     const iniciar_atendimento = Boolean(req.body?.iniciar_atendimento);
 
