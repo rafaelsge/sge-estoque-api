@@ -81,6 +81,21 @@ function extractTextFromPayload(payload: any): string | null {
   );
 }
 
+function extractContactNameFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.contato,
+    payload?.nome,
+    payload?.pushName,
+    payload?.push_name,
+    payload?.data?.pushName,
+    payload?.data?.push_name,
+    payload?.data?.sender?.pushName,
+    payload?.data?.sender?.push_name,
+    payload?.event?.pushName,
+    payload?.event?.push_name,
+  );
+}
+
 function inferTipoFromPayload(payload: any): string | null {
   const tipoInformado = asNullableString(payload?.tipo);
   if (tipoInformado) return tipoInformado;
@@ -380,7 +395,7 @@ export async function webhookMensagem(req: Request, res: Response) {
     const arquivo_mimetype =
       extractMediaMimeTypeFromPayload(req.body, arquivo_base64) ??
       (arquivo_base64 ? defaultMimeTypeByTipo(tipo) ?? 'application/octet-stream' : null);
-    const contatoNome = asNullableString(req.body?.contato ?? req.body?.nome);
+    const contatoNome = extractContactNameFromPayload(req.body);
     const contatoTipo = asNullableString(req.body?.contato_tipo ?? req.body?.tipo_contato);
     const cliente_codigo = asNullablePositiveInt(req.body?.cliente_codigo);
     const usuario_id = asNullablePositiveInt(req.body?.usuario_id);
@@ -478,7 +493,12 @@ export async function webhookMensagem(req: Request, res: Response) {
           cliente_codigo_atual: contato.cliente_codigo,
         });
         const updateData: any = {};
-        if (contatoNome && contatoNome !== contato.contato) updateData.contato = contatoNome;
+        const nomeContatoAtual = asNullableString(contato.contato);
+        const nomeContatoAtualEhPlaceholder =
+          !nomeContatoAtual || nomeContatoAtual.toLowerCase() === 'contato whatsapp';
+        if (contatoNome && contatoNome !== contato.contato && nomeContatoAtualEhPlaceholder) {
+          updateData.contato = contatoNome;
+        }
         if (contatoTipo && contatoTipo !== contato.tipo) updateData.tipo = contatoTipo;
         if (cliente_codigo && cliente_codigo !== contato.cliente_codigo) updateData.cliente_codigo = cliente_codigo;
         if (Object.keys(updateData).length > 0) {
