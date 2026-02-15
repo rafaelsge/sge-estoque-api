@@ -496,7 +496,7 @@ export async function webhookMensagem(req: Request, res: Response) {
         const nomeContatoAtual = asNullableString(contato.contato);
         const nomeContatoAtualEhPlaceholder =
           !nomeContatoAtual || nomeContatoAtual.toLowerCase() === 'contato whatsapp';
-        if (contatoNome && contatoNome !== contato.contato && nomeContatoAtualEhPlaceholder) {
+        if (!fromMe && contatoNome && contatoNome !== contato.contato && nomeContatoAtualEhPlaceholder) {
           updateData.contato = contatoNome;
         }
         if (contatoTipo && contatoTipo !== contato.tipo) updateData.tipo = contatoTipo;
