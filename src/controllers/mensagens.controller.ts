@@ -676,11 +676,21 @@ export async function listarMensagensAtendimento(req: Request, res: Response) {
     const cod_loja = asPositiveInt(req.query?.cod_loja);
     const cod_usuario = asNullablePositiveInt(req.query?.cod_usuario);
     const atendimento_id = asPositiveInt(req.params?.atendimento_id);
+    const ult_id_recebido_raw = req.query?.ult_id_recebido;
+    const ult_id_recebido = asNullablePositiveInt(ult_id_recebido_raw);
     const limit = Math.max(1, Math.min(500, Number(req.query?.limit) || 100));
     const offset = Math.max(0, Number(req.query?.offset) || 0);
 
     if (!cod_loja || !atendimento_id) {
       return res.status(400).json({ error: 'Campos cod_loja e atendimento_id sao obrigatorios.' });
+    }
+    if (
+      ult_id_recebido_raw !== undefined &&
+      ult_id_recebido_raw !== null &&
+      ult_id_recebido_raw !== '' &&
+      !ult_id_recebido
+    ) {
+      return res.status(400).json({ error: 'Campo ult_id_recebido deve ser inteiro positivo.' });
     }
 
     const atendimento = await prisma.atendimento.findUnique({
@@ -695,13 +705,18 @@ export async function listarMensagensAtendimento(req: Request, res: Response) {
       return res.status(403).json({ error: 'Atendimento em posse de outro usuario.' });
     }
 
+    const whereMensagens: any = { cod_loja, atendimento_id };
+    if (ult_id_recebido) {
+      whereMensagens.id = { gt: ult_id_recebido };
+    }
+
     const total = await prisma.mensagem.count({
-      where: { cod_loja, atendimento_id },
+      where: whereMensagens,
     });
 
     const mensagens = await prisma.mensagem.findMany({
-      where: { cod_loja, atendimento_id },
-      orderBy: { criado_em: 'asc' },
+      where: whereMensagens,
+      orderBy: { id: 'asc' },
       skip: offset,
       take: limit,
     });
@@ -806,6 +821,8 @@ export async function listarAtendimentos(req: Request, res: Response) {
     const contato_id = asNullablePositiveInt(req.query?.contato_id);
     const statusInput = asNullableString(req.query?.status);
     const status = parseStatusAtendimento(statusInput);
+    const ult_id_recebido_raw = req.query?.ult_id_recebido;
+    const ult_id_recebido = asNullablePositiveInt(ult_id_recebido_raw);
     const limit = Math.max(1, Math.min(500, Number(req.query?.limit) || 100));
     const offset = Math.max(0, Number(req.query?.offset) || 0);
 
@@ -815,13 +832,31 @@ export async function listarAtendimentos(req: Request, res: Response) {
     if (statusInput && !status) {
       return res.status(400).json({ error: "Campo status deve ser 'aberto', 'em_atendimento' ou 'finalizado'." });
     }
+    if (
+      ult_id_recebido_raw !== undefined &&
+      ult_id_recebido_raw !== null &&
+      ult_id_recebido_raw !== '' &&
+      !ult_id_recebido
+    ) {
+      return res.status(400).json({ error: 'Campo ult_id_recebido deve ser inteiro positivo.' });
+    }
+    if (ult_id_recebido && status && status !== STATUS_ABERTO) {
+      return res.status(400).json({ error: "Com ult_id_recebido, o status deve ser 'aberto'." });
+    }
 
     const where: any = {
       cod_loja,
       ...(contato_id ? { contato_id } : {}),
     };
 
-    if (status === STATUS_EM_ATENDIMENTO) {
+    if (ult_id_recebido) {
+      where.status = STATUS_ABERTO;
+      where.mensagens = {
+        some: {
+          id: { gt: ult_id_recebido },
+        },
+      };
+    } else if (status === STATUS_EM_ATENDIMENTO) {
       where.status = STATUS_EM_ATENDIMENTO;
       where.OR = [
         { usuario_id: null },

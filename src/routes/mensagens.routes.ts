@@ -157,6 +157,14 @@ router.post('/enviar', enviarMensagem);
  *           type: integer
  *         description: Filtra por contato especifico
  *       - in: query
+ *         name: ult_id_recebido
+ *         required: false
+ *         schema:
+ *           type: integer
+ *         description: >
+ *           Sincronizacao incremental por mensagem: retorna somente atendimentos `aberto`
+ *           que tenham pelo menos uma mensagem com `id` maior que este valor.
+ *       - in: query
  *         name: limit
  *         required: false
  *         schema:
@@ -218,6 +226,12 @@ router.get('/atendimentos', listarAtendimentos);
  *       - in: query
  *         name: cod_usuario
  *         required: false
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: ult_id_recebido
+ *         required: false
+ *         description: Retorna somente mensagens com id maior que este valor
  *         schema:
  *           type: integer
  *       - in: query
