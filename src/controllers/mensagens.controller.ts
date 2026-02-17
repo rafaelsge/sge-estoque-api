@@ -400,7 +400,6 @@ export async function webhookMensagem(req: Request, res: Response) {
     const cliente_codigo = asNullablePositiveInt(req.body?.cliente_codigo);
     const usuario_id = asNullablePositiveInt(req.body?.usuario_id);
     const origem = asNullableString(req.body?.origem) ?? 'whatsapp';
-    const payload = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'payload') ? req.body.payload : req.body;
 
     let lojaResolvida = null as { codigo: number } | null;
     if (apikey) {
@@ -445,7 +444,6 @@ export async function webhookMensagem(req: Request, res: Response) {
       hasArquivoBase64: Boolean(arquivo_base64),
       arquivoMimetype: arquivo_mimetype,
       base64Length: arquivo_base64 ? arquivo_base64.length : 0,
-      hasPayload: payload !== undefined && payload !== null,
     });
 
     if (!cod_loja) {
@@ -555,7 +553,6 @@ export async function webhookMensagem(req: Request, res: Response) {
           texto,
           arquivo_base64: arquivo_base64 ?? undefined,
           arquivo_mimetype: arquivo_mimetype ?? undefined,
-          payload: payload ?? undefined,
         },
       });
 
@@ -599,7 +596,6 @@ export async function enviarMensagem(req: Request, res: Response) {
       readFirstString(req.body?.arquivo_mimetype, req.body?.mimetype, req.body?.payload?.mimetype) ??
       extractMediaMimeTypeFromPayload(req.body, arquivo_base64) ??
       (arquivo_base64 ? defaultMimeTypeByTipo(tipo) ?? 'application/octet-stream' : null);
-    const payload = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'payload') ? req.body.payload : null;
     const iniciar_atendimento = Boolean(req.body?.iniciar_atendimento);
 
     if (!cod_loja || !atendimento_id || !usuario_id) {
@@ -652,7 +648,6 @@ export async function enviarMensagem(req: Request, res: Response) {
           texto,
           arquivo_base64: arquivo_base64 ?? undefined,
           arquivo_mimetype: arquivo_mimetype ?? undefined,
-          payload: payload ?? undefined,
         },
       });
 

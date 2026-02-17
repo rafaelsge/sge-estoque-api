@@ -252,7 +252,6 @@ model mensagem {
   texto         String?          @db.LongText
   arquivo_base64 String?         @db.LongText
   arquivo_mimetype String?       @db.VarChar(120)
-  payload       Json?
   criado_em     DateTime         @default(now())
   atendimento   atendimento      @relation(fields: [atendimento_id, cod_loja], references: [id, cod_loja], onDelete: Cascade)
   contato       contato          @relation(fields: [contato_id, cod_loja], references: [id, cod_loja], onDelete: Restrict)

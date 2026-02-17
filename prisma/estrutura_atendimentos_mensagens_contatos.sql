@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS `mensagens` (
   `direcao` ENUM('entrada','saida') NOT NULL,
   `tipo` VARCHAR(30) NOT NULL DEFAULT 'texto',
   `texto` LONGTEXT NULL,
-  `payload` JSON NULL,
   `criado_em` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   KEY `idx_mensagens_loja_atendimento` (`cod_loja`, `atendimento_id`),
