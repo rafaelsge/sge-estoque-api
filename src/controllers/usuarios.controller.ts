@@ -82,12 +82,6 @@ export async function cadastrarUsuario(req: Request, res: Response) {
       const senha_md5 = hasOwn(u, 'senha_md5') ? (u.senha_md5 ?? null) : null;
 
       if (!existing) {
-        if (!senha_md5) {
-          return res.status(400).json({
-            error: 'Campo senha_md5 e obrigatorio para novos usuarios.',
-          });
-        }
-
         createData.push({
           codigo,
           nome,

@@ -109,7 +109,6 @@ export default router;
  *         - codigo
  *         - nome
  *         - cod_loja
- *         - senha_md5
  *       properties:
  *         codigo:
  *           type: integer
@@ -127,6 +126,7 @@ export default router;
  *         senha_md5:
  *           type: string
  *           example: "5f4dcc3b5aa765d61d8327deb882cf99"
+ *           description: Opcional no cadastro; pode ser definida no primeiro acesso
  *         cod_loja:
  *           type: integer
  *           example: 3
