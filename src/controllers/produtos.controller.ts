@@ -255,6 +255,57 @@ export async function cadastrarProduto(req: Request, res: Response) {
     `;
     const produtoTableName = produtoTableRows[0]?.table_name ?? 'produto';
     const produtoTableIdentifier = Prisma.raw(`\`${produtoTableName.replace(/`/g, '``')}\``);
+    const sqlTokenRegex = /^[A-Za-z0-9_]+$/;
+    const sanitizeSqlToken = (value: string | null | undefined, fallback: string) => {
+      if (!value) return fallback;
+      return sqlTokenRegex.test(value) ? value : fallback;
+    };
+    const dbCharsetRows = await prisma.$queryRaw<
+      Array<{ character_set_database: string; collation_database: string }>
+    >`
+      SELECT
+        @@character_set_database AS character_set_database,
+        @@collation_database AS collation_database
+    `;
+    const defaultCharset = sanitizeSqlToken(dbCharsetRows[0]?.character_set_database, 'utf8mb4');
+    const defaultCollation = sanitizeSqlToken(dbCharsetRows[0]?.collation_database, 'utf8mb4_unicode_ci');
+    const textColumnRows = await prisma.$queryRaw<
+      Array<{
+        column_name: string;
+        character_set_name: string | null;
+        collation_name: string | null;
+      }>
+    >`
+      SELECT
+        COLUMN_NAME AS column_name,
+        CHARACTER_SET_NAME AS character_set_name,
+        COLLATION_NAME AS collation_name
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ${produtoTableName}
+        AND COLUMN_NAME IN ('nome', 'unidade_medida', 'codigo_barras')
+    `;
+    const textColumnMap = new Map(
+      textColumnRows.map((row) => [row.column_name.toLowerCase(), row] as const),
+    );
+    const nomeCharset = sanitizeSqlToken(textColumnMap.get('nome')?.character_set_name, defaultCharset);
+    const nomeCollation = sanitizeSqlToken(textColumnMap.get('nome')?.collation_name, defaultCollation);
+    const unidadeCharset = sanitizeSqlToken(
+      textColumnMap.get('unidade_medida')?.character_set_name,
+      defaultCharset,
+    );
+    const unidadeCollation = sanitizeSqlToken(
+      textColumnMap.get('unidade_medida')?.collation_name,
+      defaultCollation,
+    );
+    const barrasCharset = sanitizeSqlToken(
+      textColumnMap.get('codigo_barras')?.character_set_name,
+      defaultCharset,
+    );
+    const barrasCollation = sanitizeSqlToken(
+      textColumnMap.get('codigo_barras')?.collation_name,
+      defaultCollation,
+    );
     const eanTableRows = await prisma.$queryRaw<Array<{ table_name: string }>>`
       SELECT TABLE_NAME AS table_name
       FROM information_schema.TABLES
@@ -279,16 +330,16 @@ export async function cadastrarProduto(req: Request, res: Response) {
           CREATE TEMPORARY TABLE \`${STAGE_TABLE_NAME}\` (
             \`cod_loja\` INT NOT NULL,
             \`codigo\` INT NOT NULL,
-            \`nome\` TEXT NOT NULL,
-            \`unidade_medida\` VARCHAR(191) NOT NULL,
-            \`codigo_barras\` VARCHAR(255) NULL,
+            \`nome\` TEXT CHARACTER SET ${nomeCharset} COLLATE ${nomeCollation} NOT NULL,
+            \`unidade_medida\` VARCHAR(191) CHARACTER SET ${unidadeCharset} COLLATE ${unidadeCollation} NOT NULL,
+            \`codigo_barras\` VARCHAR(255) CHARACTER SET ${barrasCharset} COLLATE ${barrasCollation} NULL,
             \`has_codigo_barras\` TINYINT(1) NOT NULL,
             \`pr_venda\` DECIMAL(12,2) NULL,
             \`has_pr_venda\` TINYINT(1) NOT NULL,
             \`pr_custo\` DECIMAL(12,2) NULL,
             \`has_pr_custo\` TINYINT(1) NOT NULL,
             PRIMARY KEY (\`cod_loja\`, \`codigo\`)
-          ) ENGINE=InnoDB
+          ) ENGINE=InnoDB DEFAULT CHARACTER SET ${defaultCharset} COLLATE ${defaultCollation}
         `);
 
         for (const chunk of chunkArray(upsertData, PRODUTO_STAGE_INSERT_CHUNK_SIZE)) {
@@ -340,7 +391,7 @@ export async function cadastrarProduto(req: Request, res: Response) {
            AND p.\`codigo\` = s.\`codigo\`
           WHERE NOT (BINARY p.\`nome\` <=> BINARY s.\`nome\`)
              OR NOT (BINARY p.\`unidade_medida\` <=> BINARY s.\`unidade_medida\`)
-             OR NOT (p.\`codigo_barras\` <=> IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
+             OR NOT (BINARY p.\`codigo_barras\` <=> BINARY IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
              OR NOT (p.\`pr_venda\` <=> IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`))
              OR NOT (p.\`pr_custo\` <=> IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`))
         `;
@@ -375,7 +426,7 @@ export async function cadastrarProduto(req: Request, res: Response) {
             p.\`pr_custo\` = IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`)
           WHERE NOT (BINARY p.\`nome\` <=> BINARY s.\`nome\`)
              OR NOT (BINARY p.\`unidade_medida\` <=> BINARY s.\`unidade_medida\`)
-             OR NOT (p.\`codigo_barras\` <=> IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
+             OR NOT (BINARY p.\`codigo_barras\` <=> BINARY IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
              OR NOT (p.\`pr_venda\` <=> IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`))
              OR NOT (p.\`pr_custo\` <=> IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`))
         `;
