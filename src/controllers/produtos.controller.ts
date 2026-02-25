@@ -351,6 +351,16 @@ export async function cadastrarProduto(req: Request, res: Response) {
       }
     }
 
+    const produtoTableRows = await prisma.$queryRaw<Array<{ table_name: string }>>`
+      SELECT TABLE_NAME AS table_name
+      FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND LOWER(TABLE_NAME) = 'produto'
+      LIMIT 1
+    `;
+    const produtoTableName = produtoTableRows[0]?.table_name ?? 'produto';
+    const produtoTableIdentifier = Prisma.raw(`\`${produtoTableName.replace(/`/g, '``')}\``);
+
     const upsertOps: any[] = [];
     const PRODUTO_UPSERT_CHUNK_SIZE = 1000;
 
@@ -369,7 +379,7 @@ export async function cadastrarProduto(req: Request, res: Response) {
 
       upsertOps.push(
         prisma.$executeRaw`
-          INSERT INTO \`Produto\` (
+          INSERT INTO ${produtoTableIdentifier} (
             \`codigo\`,
             \`nome\`,
             \`unidade_medida\`,
