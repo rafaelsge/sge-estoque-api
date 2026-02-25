@@ -338,8 +338,8 @@ export async function cadastrarProduto(req: Request, res: Response) {
           JOIN ${produtoTableIdentifier} p
             ON p.\`cod_loja\` = s.\`cod_loja\`
            AND p.\`codigo\` = s.\`codigo\`
-          WHERE p.\`nome\` <> s.\`nome\`
-             OR p.\`unidade_medida\` <> s.\`unidade_medida\`
+          WHERE NOT (BINARY p.\`nome\` <=> BINARY s.\`nome\`)
+             OR NOT (BINARY p.\`unidade_medida\` <=> BINARY s.\`unidade_medida\`)
              OR NOT (p.\`codigo_barras\` <=> IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
              OR NOT (p.\`pr_venda\` <=> IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`))
              OR NOT (p.\`pr_custo\` <=> IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`))
@@ -373,8 +373,8 @@ export async function cadastrarProduto(req: Request, res: Response) {
             p.\`codigo_barras\` = IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`),
             p.\`pr_venda\` = IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`),
             p.\`pr_custo\` = IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`)
-          WHERE p.\`nome\` <> s.\`nome\`
-             OR p.\`unidade_medida\` <> s.\`unidade_medida\`
+          WHERE NOT (BINARY p.\`nome\` <=> BINARY s.\`nome\`)
+             OR NOT (BINARY p.\`unidade_medida\` <=> BINARY s.\`unidade_medida\`)
              OR NOT (p.\`codigo_barras\` <=> IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
              OR NOT (p.\`pr_venda\` <=> IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`))
              OR NOT (p.\`pr_custo\` <=> IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`))
