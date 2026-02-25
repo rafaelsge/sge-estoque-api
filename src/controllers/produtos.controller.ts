@@ -2,8 +2,8 @@ import { prisma } from '../prismaClient';
 import { Request, Response } from 'express';
 import { isBarcode } from '../utils/isBarcode';
 
-/**
- * ?? Busca e pesquisa produtos (por nome, c車digo ERP ou c車digo de barras)
+/*
+ * Busca produtos por nome, codigo ERP ou codigo de barras.
  */
 export async function searchProduto(req: Request, res: Response) {
   try {
@@ -13,10 +13,9 @@ export async function searchProduto(req: Request, res: Response) {
     const offset = req.query.offset ? Number(req.query.offset) : 0;
 
     if (!cod_loja) {
-      return res.status(400).json({ error: 'Parametro cod_loja 谷 obrigat車rio' });
+      return res.status(400).json({ error: 'Parametro cod_loja e obrigatorio' });
     }
 
-    // Caso sem busca: retorna todos
     if (!q_raw) {
       const total = await prisma.produto.count({ where: { cod_loja } });
       const produtos = await prisma.produto.findMany({
@@ -32,11 +31,11 @@ export async function searchProduto(req: Request, res: Response) {
       });
     }
 
-    // Busca por c車digo de barras (produto ou EAN)
     if (isBarcode(q_raw)) {
       const prodPorCodigo = await prisma.produto.findMany({
         where: { cod_loja, codigo_barras: q_raw },
       });
+
       if (prodPorCodigo.length > 0) {
         return res.json({ total: prodPorCodigo.length, data: prodPorCodigo });
       }
@@ -46,7 +45,7 @@ export async function searchProduto(req: Request, res: Response) {
         select: { cod_produto: true },
       });
 
-      const codProdutos = eans.map(e => e.cod_produto);
+      const codProdutos = eans.map((e) => e.cod_produto);
       if (codProdutos.length > 0) {
         const prods = await prisma.produto.findMany({
           where: { cod_loja, codigo: { in: codProdutos } },
@@ -55,7 +54,6 @@ export async function searchProduto(req: Request, res: Response) {
       }
     }
 
-    // Busca por nome ou c車digo ERP
     const maybeNumber = Number(q_raw);
     const where: any = { cod_loja, OR: [] };
     if (!isNaN(maybeNumber)) where.OR.push({ codigo: maybeNumber });
@@ -79,14 +77,15 @@ export async function searchProduto(req: Request, res: Response) {
   }
 }
 
-/**
- * ?? Lista EANs por loja
+/*
+ * Lista EANs por loja.
  */
 export async function listarEans(req: Request, res: Response) {
   try {
     const cod_loja = Number(req.query.cod_loja);
-    if (!cod_loja)
-      return res.status(400).json({ error: 'cod_loja 谷 obrigat車rio' });
+    if (!cod_loja) {
+      return res.status(400).json({ error: 'cod_loja e obrigatorio' });
+    }
 
     const eans = await prisma.ean.findMany({ where: { cod_loja } });
     return res.json({ total: eans.length, data: eans });
@@ -96,8 +95,8 @@ export async function listarEans(req: Request, res: Response) {
   }
 }
 
-/**
- * ? Cadastra um ou v芍rios produtos
+/*
+ * Cadastra um ou varios produtos.
  */
 export async function cadastrarProduto(req: Request, res: Response) {
   try {
@@ -131,20 +130,39 @@ export async function cadastrarProduto(req: Request, res: Response) {
     }
 
     const hasOwn = (obj: any, prop: string) => Object.prototype.hasOwnProperty.call(obj, prop);
+    const chunkArray = <T>(values: T[], size: number): T[][] => {
+      const chunks: T[][] = [];
+      for (let i = 0; i < values.length; i += size) {
+        chunks.push(values.slice(i, i + size));
+      }
+      return chunks;
+    };
 
     const codLojas = Array.from(
       new Set(
         produtos
-          .map(p => Number(p.cod_loja))
-          .filter(n => Number.isFinite(n) && n > 0),
+          .map((p) => Number(p.cod_loja))
+          .filter((n) => Number.isFinite(n) && n > 0),
       ),
     );
 
     const existentes = codLojas.length
-      ? await prisma.produto.findMany({ where: { cod_loja: { in: codLojas } } })
+      ? await prisma.produto.findMany({
+          where: { cod_loja: { in: codLojas } },
+          select: {
+            id: true,
+            cod_loja: true,
+            codigo: true,
+            nome: true,
+            unidade_medida: true,
+            codigo_barras: true,
+            pr_venda: true,
+            pr_custo: true,
+          },
+        })
       : [];
 
-    const existentesMap = new Map<string, typeof existentes[number]>();
+    const existentesMap = new Map<string, (typeof existentes)[number]>();
     const existentesPorLoja = new Map<number, number[]>();
 
     for (const e of existentes) {
@@ -157,7 +175,7 @@ export async function cadastrarProduto(req: Request, res: Response) {
     const codigosPorLoja = new Map<number, Set<number>>();
     const createData: any[] = [];
     const updateOps: any[] = [];
-    const eanOps: any[] = [];
+    const eansPorLojaProduto = new Map<number, Map<number, string[]>>();
 
     for (const p of produtos) {
       const cod_loja = Number(p.cod_loja);
@@ -236,44 +254,70 @@ export async function cadastrarProduto(req: Request, res: Response) {
         }
       }
 
-      if (hasOwn(p, 'eans') && !Array.isArray(p.eans)) {
+      const hasEans = hasOwn(p, 'eans');
+      if (hasEans && !Array.isArray(p.eans)) {
         return res.status(400).json({
           error: 'Campo eans deve ser um array quando informado.',
         });
       }
 
-      const rawEans: any[] = Array.isArray(p.eans) ? p.eans : [];
-      const eans: string[] = rawEans
-        .map((item: any) => {
-          if (typeof item === 'string' || typeof item === 'number') return String(item);
-          if (item && typeof item === 'object') {
-            if (Object.prototype.hasOwnProperty.call(item, 'barras') && item.barras !== null && item.barras !== undefined) {
-              return String(item.barras);
+      if (hasEans) {
+        const rawEans: any[] = Array.isArray(p.eans) ? p.eans : [];
+        const eans: string[] = rawEans
+          .map((item: any) => {
+            if (typeof item === 'string' || typeof item === 'number') return String(item);
+            if (item && typeof item === 'object') {
+              if (Object.prototype.hasOwnProperty.call(item, 'barras') && item.barras !== null && item.barras !== undefined) {
+                return String(item.barras);
+              }
+              if (Object.prototype.hasOwnProperty.call(item, 'codigo_barras') && item.codigo_barras !== null && item.codigo_barras !== undefined) {
+                return String(item.codigo_barras);
+              }
             }
-            if (Object.prototype.hasOwnProperty.call(item, 'codigo_barras') && item.codigo_barras !== null && item.codigo_barras !== undefined) {
-              return String(item.codigo_barras);
-            }
-          }
-          return '';
-        })
-        .map((ean: string) => ean.trim())
-        .filter((ean: string) => ean.length > 0);
-      const uniqueEans: string[] = Array.from(new Set<string>(eans));
+            return '';
+          })
+          .map((ean: string) => ean.trim())
+          .filter((ean: string) => ean.length > 0);
 
-      eanOps.push(
-        prisma.ean.deleteMany({ where: { cod_loja, cod_produto: codigo } }),
-      );
+        const uniqueEans: string[] = Array.from(new Set<string>(eans));
 
-      if (uniqueEans.length > 0) {
+        let mapLoja = eansPorLojaProduto.get(cod_loja);
+        if (!mapLoja) {
+          mapLoja = new Map<number, string[]>();
+          eansPorLojaProduto.set(cod_loja, mapLoja);
+        }
+        mapLoja.set(codigo, uniqueEans);
+      }
+    }
+
+    const eanOps: any[] = [];
+    const EAN_DELETE_CHUNK_SIZE = 5000;
+    const EAN_INSERT_CHUNK_SIZE = 5000;
+
+    for (const [cod_loja, eansPorProduto] of eansPorLojaProduto) {
+      const codigos = Array.from(eansPorProduto.keys());
+      const codigosChunks = chunkArray(codigos, EAN_DELETE_CHUNK_SIZE);
+
+      for (const codigosChunk of codigosChunks) {
         eanOps.push(
-          prisma.ean.createMany({
-            data: uniqueEans.map((ean) => ({
-              cod_loja,
-              cod_produto: codigo,
-              codigo_barras: ean,
-            })),
+          prisma.ean.deleteMany({
+            where: { cod_loja, cod_produto: { in: codigosChunk } },
           }),
         );
+      }
+
+      const eansData = Array.from(eansPorProduto.entries()).flatMap(([cod_produto, eans]) =>
+        eans.map((codigo_barras) => ({
+          cod_loja,
+          cod_produto,
+          codigo_barras,
+        })),
+      );
+
+      const eansDataChunks = chunkArray(eansData, EAN_INSERT_CHUNK_SIZE);
+      for (const eansDataChunk of eansDataChunks) {
+        if (eansDataChunk.length === 0) continue;
+        eanOps.push(prisma.ean.createMany({ data: eansDataChunk }));
       }
     }
 
@@ -319,18 +363,19 @@ export async function cadastrarProduto(req: Request, res: Response) {
     return res.status(500).json({ error: 'Erro ao cadastrar produtos.' });
   }
 }
-/**
- * ?? Atualiza um produto (busca pelo ID interno)
+
+/*
+ * Atualiza um produto pelo ID interno.
  */
 export async function atualizarProduto(req: Request, res: Response) {
   try {
     const id = Number(req.params.id);
     const { nome, unidade_medida, codigo_barras, pr_venda, pr_custo } = req.body;
 
-    if (!id) return res.status(400).json({ error: 'ID 谷 obrigat車rio' });
+    if (!id) return res.status(400).json({ error: 'ID e obrigatorio' });
 
     const produto = await prisma.produto.findUnique({ where: { id } });
-    if (!produto) return res.status(404).json({ error: 'Produto n?o encontrado' });
+    if (!produto) return res.status(404).json({ error: 'Produto nao encontrado' });
 
     const atualizado = await prisma.produto.update({
       where: { id },
@@ -350,27 +395,24 @@ export async function atualizarProduto(req: Request, res: Response) {
   }
 }
 
-/**
- * ? Exclui um produto (e EANs relacionados)
+/*
+ * Exclui um produto e seus EANs vinculados.
  */
 export async function excluirProduto(req: Request, res: Response) {
   try {
     const id = Number(req.params.id);
-    if (!id)
-      return res.status(400).json({ error: 'ID 谷 obrigat車rio' });
+    if (!id) return res.status(400).json({ error: 'ID e obrigatorio' });
 
     const produto = await prisma.produto.findUnique({ where: { id } });
-    if (!produto)
-      return res.status(404).json({ error: 'Produto n?o encontrado' });
+    if (!produto) return res.status(404).json({ error: 'Produto nao encontrado' });
 
-    // Exclui EANs com base no c車digo ERP e loja
     await prisma.ean.deleteMany({
       where: { cod_produto: produto.codigo, cod_loja: produto.cod_loja },
     });
 
     await prisma.produto.delete({ where: { id } });
 
-    return res.json({ message: 'Produto exclu赤do com sucesso.' });
+    return res.json({ message: 'Produto excluido com sucesso.' });
   } catch (error) {
     console.error('Erro em excluirProduto:', error);
     return res.status(500).json({ error: 'Erro ao excluir produto.' });
