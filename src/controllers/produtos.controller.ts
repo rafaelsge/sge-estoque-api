@@ -139,44 +139,19 @@ export async function cadastrarProduto(req: Request, res: Response) {
       return chunks;
     };
 
-    const codLojas = Array.from(
-      new Set(
-        produtos
-          .map((p) => Number(p.cod_loja))
-          .filter((n) => Number.isFinite(n) && n > 0),
-      ),
-    );
-
-    const existentes = codLojas.length
-      ? await prisma.produto.findMany({
-          where: { cod_loja: { in: codLojas } },
-          select: {
-            id: true,
-            cod_loja: true,
-            codigo: true,
-            nome: true,
-            unidade_medida: true,
-            codigo_barras: true,
-            pr_venda: true,
-            pr_custo: true,
-          },
-        })
-      : [];
-
-    const existentesMap = new Map<string, (typeof existentes)[number]>();
-    const existentesPorLoja = new Map<number, number[]>();
-
-    for (const e of existentes) {
-      const key = `${e.cod_loja}:${e.codigo}`;
-      existentesMap.set(key, e);
-      if (!existentesPorLoja.has(e.cod_loja)) existentesPorLoja.set(e.cod_loja, []);
-      existentesPorLoja.get(e.cod_loja)!.push(e.codigo);
-    }
-
     const codigosPorLoja = new Map<number, Set<number>>();
-    const upsertData: any[] = [];
-    let inseridos = 0;
-    let atualizados = 0;
+    const upsertData: Array<{
+      codigo: number;
+      cod_loja: number;
+      nome: string;
+      unidade_medida: string;
+      codigo_barras: string | null;
+      has_codigo_barras: number;
+      pr_venda: number | null;
+      has_pr_venda: number;
+      pr_custo: number | null;
+      has_pr_custo: number;
+    }> = [];
     const eansPorLojaProduto = new Map<number, Map<number, string[]>>();
 
     for (const p of produtos) {
@@ -194,8 +169,6 @@ export async function cadastrarProduto(req: Request, res: Response) {
         });
       }
       set.add(codigo);
-
-      const existing = existentesMap.get(`${cod_loja}:${codigo}`);
 
       const nome = String(p.nome);
       const unidade_medida = String(p.unidade_medida);
@@ -220,46 +193,18 @@ export async function cadastrarProduto(req: Request, res: Response) {
         return res.status(400).json({ error: 'Campo pr_custo deve ser um numero valido.' });
       }
 
-      if (!existing) {
-        upsertData.push({
-          codigo,
-          cod_loja,
-          nome,
-          unidade_medida,
-          codigo_barras: codigo_barras ?? null,
-          pr_venda: pr_venda !== undefined ? pr_venda : 0,
-          pr_custo: pr_custo !== undefined ? pr_custo : 0,
-        });
-        inseridos++;
-      } else {
-        const currentCodigoBarras = existing.codigo_barras ?? null;
-        const currentPrVenda = existing.pr_venda === null ? null : Number(existing.pr_venda);
-        const currentPrCusto = existing.pr_custo === null ? null : Number(existing.pr_custo);
-
-        const nextCodigoBarras = codigo_barras !== undefined ? codigo_barras : currentCodigoBarras;
-        const nextPrVenda = pr_venda !== undefined ? pr_venda : currentPrVenda;
-        const nextPrCusto = pr_custo !== undefined ? pr_custo : currentPrCusto;
-
-        const houveMudanca =
-          nome !== existing.nome ||
-          unidade_medida !== existing.unidade_medida ||
-          nextCodigoBarras !== currentCodigoBarras ||
-          nextPrVenda !== currentPrVenda ||
-          nextPrCusto !== currentPrCusto;
-
-        if (houveMudanca) {
-          upsertData.push({
-            codigo,
-            cod_loja,
-            nome,
-            unidade_medida,
-            codigo_barras: nextCodigoBarras,
-            pr_venda: nextPrVenda,
-            pr_custo: nextPrCusto,
-          });
-          atualizados++;
-        }
-      }
+      upsertData.push({
+        codigo,
+        cod_loja,
+        nome,
+        unidade_medida,
+        codigo_barras: codigo_barras ?? null,
+        has_codigo_barras: codigo_barras !== undefined ? 1 : 0,
+        pr_venda: pr_venda !== undefined ? pr_venda : null,
+        has_pr_venda: pr_venda !== undefined ? 1 : 0,
+        pr_custo: pr_custo !== undefined ? pr_custo : null,
+        has_pr_custo: pr_custo !== undefined ? 1 : 0,
+      });
 
       const hasEans = hasOwn(p, 'eans');
       if (hasEans && !Array.isArray(p.eans)) {
@@ -297,59 +242,9 @@ export async function cadastrarProduto(req: Request, res: Response) {
       }
     }
 
-    const eanOps: any[] = [];
+    const codLojas = Array.from(codigosPorLoja.keys());
     const EAN_DELETE_CHUNK_SIZE = 5000;
     const EAN_INSERT_CHUNK_SIZE = 5000;
-
-    for (const [cod_loja, eansPorProduto] of eansPorLojaProduto) {
-      const codigos = Array.from(eansPorProduto.keys());
-      const codigosChunks = chunkArray(codigos, EAN_DELETE_CHUNK_SIZE);
-
-      for (const codigosChunk of codigosChunks) {
-        eanOps.push(
-          prisma.ean.deleteMany({
-            where: { cod_loja, cod_produto: { in: codigosChunk } },
-          }),
-        );
-      }
-
-      const eansData = Array.from(eansPorProduto.entries()).flatMap(([cod_produto, eans]) =>
-        eans.map((codigo_barras) => ({
-          cod_loja,
-          cod_produto,
-          codigo_barras,
-        })),
-      );
-
-      const eansDataChunks = chunkArray(eansData, EAN_INSERT_CHUNK_SIZE);
-      for (const eansDataChunk of eansDataChunks) {
-        if (eansDataChunk.length === 0) continue;
-        eanOps.push(prisma.ean.createMany({ data: eansDataChunk }));
-      }
-    }
-
-    const deleteOps: any[] = [];
-    let removidos = 0;
-
-    if (isBatch) {
-      for (const cod_loja of codLojas) {
-        const existentesCodigos = existentesPorLoja.get(cod_loja) ?? [];
-        const incoming = codigosPorLoja.get(cod_loja) ?? new Set<number>();
-        const toDelete = existentesCodigos.filter((c) => !incoming.has(c));
-
-        if (toDelete.length > 0) {
-          removidos += toDelete.length;
-          deleteOps.push(
-            prisma.ean.deleteMany({
-              where: { cod_loja, cod_produto: { in: toDelete } },
-            }),
-            prisma.produto.deleteMany({
-              where: { cod_loja, codigo: { in: toDelete } },
-            }),
-          );
-        }
-      }
-    }
 
     const produtoTableRows = await prisma.$queryRaw<Array<{ table_name: string }>>`
       SELECT TABLE_NAME AS table_name
@@ -360,25 +255,132 @@ export async function cadastrarProduto(req: Request, res: Response) {
     `;
     const produtoTableName = produtoTableRows[0]?.table_name ?? 'produto';
     const produtoTableIdentifier = Prisma.raw(`\`${produtoTableName.replace(/`/g, '``')}\``);
+    const eanTableRows = await prisma.$queryRaw<Array<{ table_name: string }>>`
+      SELECT TABLE_NAME AS table_name
+      FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND LOWER(TABLE_NAME) = 'ean'
+      LIMIT 1
+    `;
+    const eanTableName = eanTableRows[0]?.table_name ?? 'ean';
+    const eanTableIdentifier = Prisma.raw(`\`${eanTableName.replace(/`/g, '``')}\``);
 
-    const upsertOps: any[] = [];
-    const PRODUTO_UPSERT_CHUNK_SIZE = 1000;
+    const STAGE_TABLE_NAME = 'tmp_produto_stage_sync';
+    const stageTableIdentifier = Prisma.raw(`\`${STAGE_TABLE_NAME}\``);
+    const PRODUTO_STAGE_INSERT_CHUNK_SIZE = 1000;
+    let inseridos = 0;
+    let atualizados = 0;
+    let removidos = 0;
 
-    for (const chunk of chunkArray(upsertData, PRODUTO_UPSERT_CHUNK_SIZE)) {
-      if (chunk.length === 0) continue;
+    if (upsertData.length > 0) {
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`DROP TEMPORARY TABLE IF EXISTS \`${STAGE_TABLE_NAME}\``);
+        await tx.$executeRawUnsafe(`
+          CREATE TEMPORARY TABLE \`${STAGE_TABLE_NAME}\` (
+            \`cod_loja\` INT NOT NULL,
+            \`codigo\` INT NOT NULL,
+            \`nome\` TEXT NOT NULL,
+            \`unidade_medida\` VARCHAR(191) NOT NULL,
+            \`codigo_barras\` VARCHAR(255) NULL,
+            \`has_codigo_barras\` TINYINT(1) NOT NULL,
+            \`pr_venda\` DECIMAL(12,2) NULL,
+            \`has_pr_venda\` TINYINT(1) NOT NULL,
+            \`pr_custo\` DECIMAL(12,2) NULL,
+            \`has_pr_custo\` TINYINT(1) NOT NULL,
+            PRIMARY KEY (\`cod_loja\`, \`codigo\`)
+          ) ENGINE=InnoDB
+        `);
 
-      const values = chunk.map((item) => Prisma.sql`(
-        ${item.codigo},
-        ${item.nome},
-        ${item.unidade_medida},
-        ${item.codigo_barras},
-        ${item.cod_loja},
-        ${item.pr_venda},
-        ${item.pr_custo}
-      )`);
+        for (const chunk of chunkArray(upsertData, PRODUTO_STAGE_INSERT_CHUNK_SIZE)) {
+          const values = chunk.map((item) => Prisma.sql`(
+            ${item.cod_loja},
+            ${item.codigo},
+            ${item.nome},
+            ${item.unidade_medida},
+            ${item.codigo_barras},
+            ${item.has_codigo_barras},
+            ${item.pr_venda},
+            ${item.has_pr_venda},
+            ${item.pr_custo},
+            ${item.has_pr_custo}
+          )`);
 
-      upsertOps.push(
-        prisma.$executeRaw`
+          await tx.$executeRaw`
+            INSERT INTO ${stageTableIdentifier} (
+              \`cod_loja\`,
+              \`codigo\`,
+              \`nome\`,
+              \`unidade_medida\`,
+              \`codigo_barras\`,
+              \`has_codigo_barras\`,
+              \`pr_venda\`,
+              \`has_pr_venda\`,
+              \`pr_custo\`,
+              \`has_pr_custo\`
+            )
+            VALUES ${Prisma.join(values)}
+          `;
+        }
+
+        const insertedCountRows = await tx.$queryRaw<Array<{ total: bigint | number }>>`
+          SELECT COUNT(*) AS total
+          FROM ${stageTableIdentifier} s
+          LEFT JOIN ${produtoTableIdentifier} p
+            ON p.\`cod_loja\` = s.\`cod_loja\`
+           AND p.\`codigo\` = s.\`codigo\`
+          WHERE p.\`id\` IS NULL
+        `;
+        inseridos = Number(insertedCountRows[0]?.total ?? 0);
+
+        const updatedCountRows = await tx.$queryRaw<Array<{ total: bigint | number }>>`
+          SELECT COUNT(*) AS total
+          FROM ${stageTableIdentifier} s
+          JOIN ${produtoTableIdentifier} p
+            ON p.\`cod_loja\` = s.\`cod_loja\`
+           AND p.\`codigo\` = s.\`codigo\`
+          WHERE p.\`nome\` <> s.\`nome\`
+             OR p.\`unidade_medida\` <> s.\`unidade_medida\`
+             OR NOT (p.\`codigo_barras\` <=> IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
+             OR NOT (p.\`pr_venda\` <=> IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`))
+             OR NOT (p.\`pr_custo\` <=> IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`))
+        `;
+        atualizados = Number(updatedCountRows[0]?.total ?? 0);
+
+        if (isBatch && codLojas.length > 0) {
+          const lojasValues = codLojas.map((cod_loja) => Prisma.sql`${cod_loja}`);
+          const removedCountRows = await tx.$queryRaw<Array<{ total: bigint | number }>>`
+            SELECT COUNT(*) AS total
+            FROM ${produtoTableIdentifier} p
+            WHERE p.\`cod_loja\` IN (${Prisma.join(lojasValues)})
+              AND NOT EXISTS (
+                SELECT 1
+                FROM ${stageTableIdentifier} s
+                WHERE s.\`cod_loja\` = p.\`cod_loja\`
+                  AND s.\`codigo\` = p.\`codigo\`
+              )
+          `;
+          removidos = Number(removedCountRows[0]?.total ?? 0);
+        }
+
+        await tx.$executeRaw`
+          UPDATE ${produtoTableIdentifier} p
+          JOIN ${stageTableIdentifier} s
+            ON p.\`cod_loja\` = s.\`cod_loja\`
+           AND p.\`codigo\` = s.\`codigo\`
+          SET
+            p.\`nome\` = s.\`nome\`,
+            p.\`unidade_medida\` = s.\`unidade_medida\`,
+            p.\`codigo_barras\` = IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`),
+            p.\`pr_venda\` = IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`),
+            p.\`pr_custo\` = IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`)
+          WHERE p.\`nome\` <> s.\`nome\`
+             OR p.\`unidade_medida\` <> s.\`unidade_medida\`
+             OR NOT (p.\`codigo_barras\` <=> IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, p.\`codigo_barras\`))
+             OR NOT (p.\`pr_venda\` <=> IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, p.\`pr_venda\`))
+             OR NOT (p.\`pr_custo\` <=> IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, p.\`pr_custo\`))
+        `;
+
+        await tx.$executeRaw`
           INSERT INTO ${produtoTableIdentifier} (
             \`codigo\`,
             \`nome\`,
@@ -388,22 +390,71 @@ export async function cadastrarProduto(req: Request, res: Response) {
             \`pr_venda\`,
             \`pr_custo\`
           )
-          VALUES ${Prisma.join(values)}
-          ON DUPLICATE KEY UPDATE
-            \`nome\` = VALUES(\`nome\`),
-            \`unidade_medida\` = VALUES(\`unidade_medida\`),
-            \`codigo_barras\` = VALUES(\`codigo_barras\`),
-            \`pr_venda\` = VALUES(\`pr_venda\`),
-            \`pr_custo\` = VALUES(\`pr_custo\`)
-        `,
-      );
-    }
+          SELECT
+            s.\`codigo\`,
+            s.\`nome\`,
+            s.\`unidade_medida\`,
+            IF(s.\`has_codigo_barras\` = 1, s.\`codigo_barras\`, NULL),
+            s.\`cod_loja\`,
+            IF(s.\`has_pr_venda\` = 1, s.\`pr_venda\`, 0),
+            IF(s.\`has_pr_custo\` = 1, s.\`pr_custo\`, 0)
+          FROM ${stageTableIdentifier} s
+          LEFT JOIN ${produtoTableIdentifier} p
+            ON p.\`cod_loja\` = s.\`cod_loja\`
+           AND p.\`codigo\` = s.\`codigo\`
+          WHERE p.\`id\` IS NULL
+        `;
 
-    const ops: any[] = [];
-    ops.push(...upsertOps, ...eanOps, ...deleteOps);
+        for (const [cod_loja, eansPorProduto] of eansPorLojaProduto) {
+          const codigos = Array.from(eansPorProduto.keys());
+          const codigosChunks = chunkArray(codigos, EAN_DELETE_CHUNK_SIZE);
 
-    if (ops.length > 0) {
-      await prisma.$transaction(ops);
+          for (const codigosChunk of codigosChunks) {
+            await tx.ean.deleteMany({
+              where: { cod_loja, cod_produto: { in: codigosChunk } },
+            });
+          }
+
+          const eansData = Array.from(eansPorProduto.entries()).flatMap(([cod_produto, eans]) =>
+            eans.map((codigo_barras) => ({
+              cod_loja,
+              cod_produto,
+              codigo_barras,
+            })),
+          );
+
+          const eansDataChunks = chunkArray(eansData, EAN_INSERT_CHUNK_SIZE);
+          for (const eansDataChunk of eansDataChunks) {
+            if (eansDataChunk.length === 0) continue;
+            await tx.ean.createMany({ data: eansDataChunk });
+          }
+        }
+
+        if (isBatch && codLojas.length > 0) {
+          const lojasValues = codLojas.map((cod_loja) => Prisma.sql`${cod_loja}`);
+          await tx.$executeRaw`
+            DELETE e
+            FROM ${eanTableIdentifier} e
+            LEFT JOIN ${stageTableIdentifier} s
+              ON s.\`cod_loja\` = e.\`cod_loja\`
+             AND s.\`codigo\` = e.\`cod_produto\`
+            WHERE e.\`cod_loja\` IN (${Prisma.join(lojasValues)})
+              AND s.\`codigo\` IS NULL
+          `;
+
+          await tx.$executeRaw`
+            DELETE p
+            FROM ${produtoTableIdentifier} p
+            LEFT JOIN ${stageTableIdentifier} s
+              ON s.\`cod_loja\` = p.\`cod_loja\`
+             AND s.\`codigo\` = p.\`codigo\`
+            WHERE p.\`cod_loja\` IN (${Prisma.join(lojasValues)})
+              AND s.\`codigo\` IS NULL
+          `;
+        }
+
+        await tx.$executeRawUnsafe(`DROP TEMPORARY TABLE IF EXISTS \`${STAGE_TABLE_NAME}\``);
+      });
     }
 
     return res.status(201).json({
