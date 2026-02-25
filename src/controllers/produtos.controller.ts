@@ -1,6 +1,7 @@
 import { prisma } from '../prismaClient';
 import { Request, Response } from 'express';
 import { isBarcode } from '../utils/isBarcode';
+import { Prisma } from '@prisma/client';
 
 /*
  * Busca produtos por nome, codigo ERP ou codigo de barras.
@@ -173,8 +174,9 @@ export async function cadastrarProduto(req: Request, res: Response) {
     }
 
     const codigosPorLoja = new Map<number, Set<number>>();
-    const createData: any[] = [];
-    const updateOps: any[] = [];
+    const upsertData: any[] = [];
+    let inseridos = 0;
+    let atualizados = 0;
     const eansPorLojaProduto = new Map<number, Map<number, string[]>>();
 
     for (const p of produtos) {
@@ -219,38 +221,43 @@ export async function cadastrarProduto(req: Request, res: Response) {
       }
 
       if (!existing) {
-        const data: any = {
+        upsertData.push({
           codigo,
           cod_loja,
           nome,
           unidade_medida,
           codigo_barras: codigo_barras ?? null,
-        };
-        if (pr_venda !== undefined) data.pr_venda = pr_venda;
-        if (pr_custo !== undefined) data.pr_custo = pr_custo;
-        createData.push(data);
+          pr_venda: pr_venda !== undefined ? pr_venda : 0,
+          pr_custo: pr_custo !== undefined ? pr_custo : 0,
+        });
+        inseridos++;
       } else {
-        const data: any = {};
-        if (nome !== existing.nome) data.nome = nome;
-        if (unidade_medida !== existing.unidade_medida) data.unidade_medida = unidade_medida;
+        const currentCodigoBarras = existing.codigo_barras ?? null;
+        const currentPrVenda = existing.pr_venda === null ? null : Number(existing.pr_venda);
+        const currentPrCusto = existing.pr_custo === null ? null : Number(existing.pr_custo);
 
-        if (codigo_barras !== undefined) {
-          const current = existing.codigo_barras ?? null;
-          if (codigo_barras !== current) data.codigo_barras = codigo_barras;
-        }
+        const nextCodigoBarras = codigo_barras !== undefined ? codigo_barras : currentCodigoBarras;
+        const nextPrVenda = pr_venda !== undefined ? pr_venda : currentPrVenda;
+        const nextPrCusto = pr_custo !== undefined ? pr_custo : currentPrCusto;
 
-        if (pr_venda !== undefined) {
-          const current = existing.pr_venda === null ? null : Number(existing.pr_venda);
-          if (pr_venda !== current) data.pr_venda = pr_venda;
-        }
+        const houveMudanca =
+          nome !== existing.nome ||
+          unidade_medida !== existing.unidade_medida ||
+          nextCodigoBarras !== currentCodigoBarras ||
+          nextPrVenda !== currentPrVenda ||
+          nextPrCusto !== currentPrCusto;
 
-        if (pr_custo !== undefined) {
-          const current = existing.pr_custo === null ? null : Number(existing.pr_custo);
-          if (pr_custo !== current) data.pr_custo = pr_custo;
-        }
-
-        if (Object.keys(data).length > 0) {
-          updateOps.push(prisma.produto.update({ where: { id: existing.id }, data }));
+        if (houveMudanca) {
+          upsertData.push({
+            codigo,
+            cod_loja,
+            nome,
+            unidade_medida,
+            codigo_barras: nextCodigoBarras,
+            pr_venda: nextPrVenda,
+            pr_custo: nextPrCusto,
+          });
+          atualizados++;
         }
       }
 
@@ -344,9 +351,46 @@ export async function cadastrarProduto(req: Request, res: Response) {
       }
     }
 
+    const upsertOps: any[] = [];
+    const PRODUTO_UPSERT_CHUNK_SIZE = 1000;
+
+    for (const chunk of chunkArray(upsertData, PRODUTO_UPSERT_CHUNK_SIZE)) {
+      if (chunk.length === 0) continue;
+
+      const values = chunk.map((item) => Prisma.sql`(
+        ${item.codigo},
+        ${item.nome},
+        ${item.unidade_medida},
+        ${item.codigo_barras},
+        ${item.cod_loja},
+        ${item.pr_venda},
+        ${item.pr_custo}
+      )`);
+
+      upsertOps.push(
+        prisma.$executeRaw`
+          INSERT INTO \`Produto\` (
+            \`codigo\`,
+            \`nome\`,
+            \`unidade_medida\`,
+            \`codigo_barras\`,
+            \`cod_loja\`,
+            \`pr_venda\`,
+            \`pr_custo\`
+          )
+          VALUES ${Prisma.join(values)}
+          ON DUPLICATE KEY UPDATE
+            \`nome\` = VALUES(\`nome\`),
+            \`unidade_medida\` = VALUES(\`unidade_medida\`),
+            \`codigo_barras\` = VALUES(\`codigo_barras\`),
+            \`pr_venda\` = VALUES(\`pr_venda\`),
+            \`pr_custo\` = VALUES(\`pr_custo\`)
+        `,
+      );
+    }
+
     const ops: any[] = [];
-    if (createData.length > 0) ops.push(prisma.produto.createMany({ data: createData }));
-    ops.push(...updateOps, ...eanOps, ...deleteOps);
+    ops.push(...upsertOps, ...eanOps, ...deleteOps);
 
     if (ops.length > 0) {
       await prisma.$transaction(ops);
@@ -354,8 +398,8 @@ export async function cadastrarProduto(req: Request, res: Response) {
 
     return res.status(201).json({
       message: 'Produtos processados com sucesso.',
-      inseridos: createData.length,
-      atualizados: updateOps.length,
+      inseridos,
+      atualizados,
       removidos,
     });
   } catch (error) {
