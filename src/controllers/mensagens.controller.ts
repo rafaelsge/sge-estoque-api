@@ -9,6 +9,14 @@ const STATUS_ATENDIMENTO_VALIDOS = new Set([
   STATUS_EM_ATENDIMENTO,
   STATUS_FINALIZADO,
 ]);
+const STATUS_FLUXO_INICIADO = 'iniciado' as const;
+const STATUS_FLUXO_AGUARDANDO = 'aguardando' as const;
+const STATUS_FLUXO_FINALIZADO = 'finalizado' as const;
+const STATUS_FLUXO_VALIDOS = new Set([
+  STATUS_FLUXO_INICIADO,
+  STATUS_FLUXO_AGUARDANDO,
+  STATUS_FLUXO_FINALIZADO,
+]);
 
 function payloadPreview(payload: unknown, max = 6000): string {
   try {
@@ -348,6 +356,19 @@ function parseStatusAtendimento(value: unknown): typeof STATUS_ABERTO | typeof S
   return status as any;
 }
 
+function parseStatusFluxo(value: unknown): typeof STATUS_FLUXO_INICIADO | typeof STATUS_FLUXO_AGUARDANDO | typeof STATUS_FLUXO_FINALIZADO | null {
+  const status = asNullableString(value)?.toLowerCase() ?? null;
+  if (!status) return null;
+  if (!STATUS_FLUXO_VALIDOS.has(status as any)) return null;
+  return status as any;
+}
+
+function mapStatusDbToFluxo(statusDb: string): typeof STATUS_FLUXO_INICIADO | typeof STATUS_FLUXO_AGUARDANDO | typeof STATUS_FLUXO_FINALIZADO {
+  if (statusDb === STATUS_EM_ATENDIMENTO) return STATUS_FLUXO_INICIADO;
+  if (statusDb === STATUS_FINALIZADO) return STATUS_FLUXO_FINALIZADO;
+  return STATUS_FLUXO_AGUARDANDO;
+}
+
 export async function webhookMensagem(req: Request, res: Response) {
   try {
     console.info('[mensagens/webhook] requisicao recebida:', {
@@ -512,14 +533,14 @@ export async function webhookMensagem(req: Request, res: Response) {
         where: {
           cod_loja,
           contato_id: contato.id,
-          status: STATUS_ABERTO,
+          status: { in: [STATUS_ABERTO, STATUS_EM_ATENDIMENTO] },
         },
         orderBy: { id: 'desc' },
       });
 
       let novo_atendimento = false;
       if (!atendimento) {
-        console.info('[mensagens/webhook] atendimento aberto nao encontrado, criando', {
+        console.info('[mensagens/webhook] nenhum atendimento ativo encontrado (inexistente ou finalizado), criando novo', {
           cod_loja,
           contato_id: contato.id,
         });
@@ -534,7 +555,7 @@ export async function webhookMensagem(req: Request, res: Response) {
         });
         novo_atendimento = true;
       } else {
-        console.info('[mensagens/webhook] reutilizando atendimento aberto', {
+        console.info('[mensagens/webhook] reutilizando atendimento ativo', {
           atendimento_id: atendimento.id,
           status: atendimento.status,
           usuario_id: atendimento.usuario_id,
@@ -1035,14 +1056,86 @@ export async function vincularContatoCliente(req: Request, res: Response) {
   }
 }
 
-export async function iniciarAtendimento(req: Request, res: Response) {
+export async function atualizarStatusAtendimento(req: Request, res: Response) {
   try {
     const cod_loja = asPositiveInt(req.body?.cod_loja);
-    const cod_usuario = asPositiveInt(req.body?.cod_usuario);
+    const cod_usuario = asNullablePositiveInt(req.body?.cod_usuario);
+    const atendimento_id = asPositiveInt(req.params?.atendimento_id);
+    const status_fluxo = parseStatusFluxo(req.body?.status);
+
+    if (!cod_loja || !atendimento_id || !status_fluxo) {
+      return res.status(400).json({
+        error: "Campos cod_loja, atendimento_id e status sao obrigatorios. status deve ser 'iniciado', 'aguardando' ou 'finalizado'.",
+      });
+    }
+
+    const atendimento = await prisma.atendimento.findUnique({
+      where: { id_cod_loja: { id: atendimento_id, cod_loja } },
+    });
+    if (!atendimento) {
+      return res.status(404).json({ error: 'Atendimento nao encontrado.' });
+    }
+
+    if (status_fluxo !== STATUS_FLUXO_FINALIZADO && atendimento.status === STATUS_FINALIZADO) {
+      return res.status(400).json({ error: 'Atendimento finalizado nao pode voltar para outra etapa.' });
+    }
+
+    if (atendimento.status === STATUS_EM_ATENDIMENTO && atendimento.usuario_id && cod_usuario && atendimento.usuario_id !== cod_usuario) {
+      return res.status(403).json({ error: 'Atendimento em posse de outro usuario.' });
+    }
+
+    const usuarioEfetivo = cod_usuario ?? atendimento.usuario_id ?? null;
+    if (atendimento.status === STATUS_ABERTO && !usuarioEfetivo) {
+      return res.status(400).json({
+        error: 'Campo cod_usuario e obrigatorio para mover atendimento aberto sem usuario definido.',
+      });
+    }
+
+    const dataUpdate: any = {};
+    if (status_fluxo === STATUS_FLUXO_INICIADO) {
+      dataUpdate.status = STATUS_EM_ATENDIMENTO;
+      dataUpdate.usuario_id = usuarioEfetivo;
+      dataUpdate.iniciado_em = atendimento.iniciado_em ?? new Date();
+    } else if (status_fluxo === STATUS_FLUXO_AGUARDANDO) {
+      dataUpdate.status = STATUS_ABERTO;
+      dataUpdate.usuario_id = usuarioEfetivo;
+    } else {
+      dataUpdate.status = STATUS_FINALIZADO;
+      dataUpdate.usuario_id = usuarioEfetivo ?? atendimento.usuario_id;
+      dataUpdate.finalizado_em = atendimento.finalizado_em ?? new Date();
+    }
+
+    const atualizado = await prisma.atendimento.update({
+      where: { id: atendimento.id },
+      data: dataUpdate,
+    });
+
+    return res.json({
+      message: 'Status do atendimento atualizado com sucesso.',
+      id: atualizado.id,
+      status_fluxo,
+      status: atualizado.status,
+      usuario_id: atualizado.usuario_id,
+      iniciado_em: atualizado.iniciado_em,
+      finalizado_em: atualizado.finalizado_em,
+    });
+  } catch (error) {
+    console.error('Erro em atualizarStatusAtendimento:', error);
+    return res.status(500).json({ error: 'Erro ao atualizar status do atendimento.' });
+  }
+}
+
+export async function transferirUsuarioAtendimento(req: Request, res: Response) {
+  try {
+    const cod_loja = asPositiveInt(req.body?.cod_loja);
+    const cod_usuario_origem = asNullablePositiveInt(req.body?.cod_usuario);
+    const cod_usuario_destino = asPositiveInt(req.body?.cod_usuario_destino);
     const atendimento_id = asPositiveInt(req.params?.atendimento_id);
 
-    if (!cod_loja || !cod_usuario || !atendimento_id) {
-      return res.status(400).json({ error: 'Campos cod_loja, cod_usuario e atendimento_id sao obrigatorios.' });
+    if (!cod_loja || !atendimento_id || !cod_usuario_destino) {
+      return res.status(400).json({
+        error: 'Campos cod_loja, atendimento_id e cod_usuario_destino sao obrigatorios.',
+      });
     }
 
     const atendimento = await prisma.atendimento.findUnique({
@@ -1052,69 +1145,37 @@ export async function iniciarAtendimento(req: Request, res: Response) {
       return res.status(404).json({ error: 'Atendimento nao encontrado.' });
     }
     if (atendimento.status === STATUS_FINALIZADO) {
-      return res.status(400).json({ error: 'Atendimento finalizado nao pode ser iniciado.' });
+      return res.status(400).json({ error: 'Atendimento finalizado nao pode ser transferido.' });
     }
-    if (atendimento.status === STATUS_EM_ATENDIMENTO && atendimento.usuario_id && atendimento.usuario_id !== cod_usuario) {
-      return res.status(409).json({ error: 'Atendimento ja esta em atendimento por outro usuario.' });
+    if (atendimento.usuario_id && cod_usuario_origem && atendimento.usuario_id !== cod_usuario_origem) {
+      return res.status(403).json({ error: 'Atendimento em posse de outro usuario.' });
+    }
+    if (atendimento.usuario_id === cod_usuario_destino) {
+      return res.json({
+        message: 'Atendimento ja esta vinculado ao usuario informado.',
+        id: atendimento.id,
+        status_fluxo: mapStatusDbToFluxo(atendimento.status),
+        status: atendimento.status,
+        usuario_id: atendimento.usuario_id,
+      });
     }
 
     const atualizado = await prisma.atendimento.update({
       where: { id: atendimento.id },
       data: {
-        status: STATUS_EM_ATENDIMENTO,
-        usuario_id: cod_usuario,
-        iniciado_em: atendimento.iniciado_em ?? new Date(),
+        usuario_id: cod_usuario_destino,
       },
     });
 
     return res.json({
-      message: 'Atendimento iniciado com sucesso.',
+      message: 'Usuario do atendimento transferido com sucesso.',
       id: atualizado.id,
+      status_fluxo: mapStatusDbToFluxo(atualizado.status),
       status: atualizado.status,
       usuario_id: atualizado.usuario_id,
     });
   } catch (error) {
-    console.error('Erro em iniciarAtendimento:', error);
-    return res.status(500).json({ error: 'Erro ao iniciar atendimento.' });
-  }
-}
-
-export async function finalizarAtendimento(req: Request, res: Response) {
-  try {
-    const cod_loja = asPositiveInt(req.body?.cod_loja);
-    const cod_usuario = asNullablePositiveInt(req.body?.cod_usuario);
-    const atendimento_id = asPositiveInt(req.params?.atendimento_id);
-
-    if (!cod_loja || !atendimento_id) {
-      return res.status(400).json({ error: 'Campos cod_loja e atendimento_id sao obrigatorios.' });
-    }
-
-    const atendimento = await prisma.atendimento.findUnique({
-      where: { id_cod_loja: { id: atendimento_id, cod_loja } },
-    });
-    if (!atendimento) {
-      return res.status(404).json({ error: 'Atendimento nao encontrado.' });
-    }
-    if (atendimento.status === STATUS_EM_ATENDIMENTO && atendimento.usuario_id && cod_usuario && atendimento.usuario_id !== cod_usuario) {
-      return res.status(403).json({ error: 'Atendimento em posse de outro usuario.' });
-    }
-
-    const atualizado = await prisma.atendimento.update({
-      where: { id: atendimento.id },
-      data: {
-        status: STATUS_FINALIZADO,
-        finalizado_em: atendimento.finalizado_em ?? new Date(),
-      },
-    });
-
-    return res.json({
-      message: 'Atendimento finalizado com sucesso.',
-      id: atualizado.id,
-      status: atualizado.status,
-      finalizado_em: atualizado.finalizado_em,
-    });
-  } catch (error) {
-    console.error('Erro em finalizarAtendimento:', error);
-    return res.status(500).json({ error: 'Erro ao finalizar atendimento.' });
+    console.error('Erro em transferirUsuarioAtendimento:', error);
+    return res.status(500).json({ error: 'Erro ao transferir usuario do atendimento.' });
   }
 }

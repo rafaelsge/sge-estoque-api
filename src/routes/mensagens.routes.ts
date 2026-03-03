@@ -7,8 +7,8 @@ import {
   listarAtendimentos,
   ajustarNomeContato,
   vincularContatoCliente,
-  iniciarAtendimento,
-  finalizarAtendimento,
+  atualizarStatusAtendimento,
+  transferirUsuarioAtendimento,
 } from '../controllers/mensagens.controller';
 
 const router = Router();
@@ -27,7 +27,8 @@ const router = Router();
  *     summary: Webhook da Evolution (aceita /webhook e /webhook/{evento})
  *     tags: [Mensagens]
  *     description: >
- *       Recebe eventos da Evolution, identifica a loja por `apikey`, cria/reusa contato e atendimento aberto,
+ *       Recebe eventos da Evolution, identifica a loja por `apikey`, cria/reusa contato e atendimento ativo
+ *       (aberto ou em_atendimento) e cria um novo quando nao existir ativo (ex.: ultimo finalizado),
  *       e registra a mensagem quando houver `texto` ou `arquivo_base64`.
  *     requestBody:
  *       required: true
@@ -342,9 +343,9 @@ router.patch('/contato/:contato_id/cliente', vincularContatoCliente);
 
 /**
  * @swagger
- * /mensagens/atendimento/{atendimento_id}/iniciar:
+ * /mensagens/atendimento/{atendimento_id}/status:
  *   post:
- *     summary: Inicia atendimento e vincula ao usuario
+ *     summary: Atualiza etapa do atendimento
  *     tags: [Mensagens]
  *     parameters:
  *       - in: path
@@ -359,17 +360,18 @@ router.patch('/contato/:contato_id/cliente', vincularContatoCliente);
  *           example:
  *             cod_loja: 3
  *             cod_usuario: 7
+ *             status: "iniciado"
  *     responses:
  *       200:
- *         description: Atendimento iniciado
+ *         description: Status do atendimento atualizado
  */
-router.post('/atendimento/:atendimento_id/iniciar', iniciarAtendimento);
+router.post('/atendimento/:atendimento_id/status', atualizarStatusAtendimento);
 
 /**
  * @swagger
- * /mensagens/atendimento/{atendimento_id}/finalizar:
+ * /mensagens/atendimento/{atendimento_id}/transferir-usuario:
  *   post:
- *     summary: Finaliza atendimento
+ *     summary: Transfere o atendimento para outro usuario
  *     tags: [Mensagens]
  *     parameters:
  *       - in: path
@@ -384,11 +386,12 @@ router.post('/atendimento/:atendimento_id/iniciar', iniciarAtendimento);
  *           example:
  *             cod_loja: 3
  *             cod_usuario: 7
+ *             cod_usuario_destino: 12
  *     responses:
  *       200:
- *         description: Atendimento finalizado
+ *         description: Atendimento transferido
  */
-router.post('/atendimento/:atendimento_id/finalizar', finalizarAtendimento);
+router.post('/atendimento/:atendimento_id/transferir-usuario', transferirUsuarioAtendimento);
 
 export default router;
 
