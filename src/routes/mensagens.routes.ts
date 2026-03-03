@@ -5,6 +5,8 @@ import {
   listarMensagensAtendimento,
   listarMensagensContato,
   listarAtendimentos,
+  ajustarNomeContato,
+  vincularContatoCliente,
   iniciarAtendimento,
   finalizarAtendimento,
 } from '../controllers/mensagens.controller';
@@ -287,6 +289,56 @@ router.get('/atendimento/:atendimento_id', listarMensagensAtendimento);
  *         description: Lista de mensagens do contato
  */
 router.get('/contato/:contato_id', listarMensagensContato);
+
+/**
+ * @swagger
+ * /mensagens/contato/{contato_id}/nome:
+ *   patch:
+ *     summary: Ajusta o nome de um contato
+ *     tags: [Mensagens]
+ *     parameters:
+ *       - in: path
+ *         name: contato_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             cod_loja: 3
+ *             contato: "Rafael Almeida"
+ *     responses:
+ *       200:
+ *         description: Nome atualizado
+ */
+router.patch('/contato/:contato_id/nome', ajustarNomeContato);
+
+/**
+ * @swagger
+ * /mensagens/contato/{contato_id}/cliente:
+ *   patch:
+ *     summary: Vincula um contato a um cliente
+ *     tags: [Mensagens]
+ *     parameters:
+ *       - in: path
+ *         name: contato_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             cod_loja: 3
+ *             cliente_codigo: 2001
+ *     responses:
+ *       200:
+ *         description: Contato vinculado ao cliente
+ */
+router.patch('/contato/:contato_id/cliente', vincularContatoCliente);
 
 /**
  * @swagger

@@ -923,6 +923,118 @@ export async function listarAtendimentos(req: Request, res: Response) {
   }
 }
 
+export async function ajustarNomeContato(req: Request, res: Response) {
+  try {
+    const cod_loja = asPositiveInt(req.body?.cod_loja);
+    const contato_id = asPositiveInt(req.params?.contato_id);
+    const novoNome = asNullableString(req.body?.contato ?? req.body?.nome);
+
+    if (!cod_loja || !contato_id || !novoNome) {
+      return res.status(400).json({ error: 'Campos cod_loja, contato_id e contato sao obrigatorios.' });
+    }
+
+    const contato = await prisma.contato.findUnique({
+      where: { id_cod_loja: { id: contato_id, cod_loja } },
+    });
+
+    if (!contato) {
+      return res.status(404).json({ error: 'Contato nao encontrado.' });
+    }
+
+    if (contato.contato === novoNome) {
+      return res.json({
+        message: 'Nome do contato ja esta atualizado.',
+        id: contato.id,
+        cod_loja: contato.cod_loja,
+        contato: contato.contato,
+        telefone: contato.telefone,
+      });
+    }
+
+    const atualizado = await prisma.contato.update({
+      where: { id: contato.id },
+      data: { contato: novoNome },
+    });
+
+    return res.json({
+      message: 'Nome do contato atualizado com sucesso.',
+      id: atualizado.id,
+      cod_loja: atualizado.cod_loja,
+      contato: atualizado.contato,
+      telefone: atualizado.telefone,
+    });
+  } catch (error) {
+    console.error('Erro em ajustarNomeContato:', error);
+    return res.status(500).json({ error: 'Erro ao ajustar nome do contato.' });
+  }
+}
+
+export async function vincularContatoCliente(req: Request, res: Response) {
+  try {
+    const cod_loja = asPositiveInt(req.body?.cod_loja);
+    const contato_id = asPositiveInt(req.params?.contato_id);
+    const cliente_codigo = asPositiveInt(req.body?.cliente_codigo);
+
+    if (!cod_loja || !contato_id || !cliente_codigo) {
+      return res.status(400).json({ error: 'Campos cod_loja, contato_id e cliente_codigo sao obrigatorios.' });
+    }
+
+    const contato = await prisma.contato.findUnique({
+      where: { id_cod_loja: { id: contato_id, cod_loja } },
+    });
+
+    if (!contato) {
+      return res.status(404).json({ error: 'Contato nao encontrado.' });
+    }
+
+    const cliente = await prisma.cliente.findFirst({
+      where: { cod_loja, codigo: cliente_codigo },
+      select: { id: true, codigo: true, nome: true },
+    });
+
+    if (!cliente) {
+      return res.status(404).json({ error: 'Cliente nao encontrado para cod_loja e cliente_codigo informados.' });
+    }
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      const contatoAtualizado = await tx.contato.update({
+        where: { id: contato.id },
+        data: { cliente_codigo },
+      });
+
+      const atendimentosAtualizados = await tx.atendimento.updateMany({
+        where: {
+          cod_loja,
+          contato_id: contato.id,
+          status: { in: [STATUS_ABERTO, STATUS_EM_ATENDIMENTO] },
+        },
+        data: { cliente_codigo },
+      });
+
+      return {
+        contatoAtualizado,
+        atendimentosAtualizados: atendimentosAtualizados.count,
+      };
+    });
+
+    return res.json({
+      message: 'Contato vinculado ao cliente com sucesso.',
+      contato: {
+        id: resultado.contatoAtualizado.id,
+        cod_loja: resultado.contatoAtualizado.cod_loja,
+        contato: resultado.contatoAtualizado.contato,
+        telefone: resultado.contatoAtualizado.telefone,
+        cliente_codigo: resultado.contatoAtualizado.cliente_codigo,
+      },
+      cliente,
+      atendimentos_atualizados: resultado.atendimentosAtualizados,
+    });
+  } catch (error) {
+    console.error('Erro em vincularContatoCliente:', error);
+    return res.status(500).json({ error: 'Erro ao vincular contato com cliente.' });
+  }
+}
+
 export async function iniciarAtendimento(req: Request, res: Response) {
   try {
     const cod_loja = asPositiveInt(req.body?.cod_loja);
