@@ -147,12 +147,22 @@ router.post('/enviar', enviarMensagem);
  *           enum: [aberto, em_atendimento, finalizado]
  *         description: Filtro por status do atendimento
  *       - in: query
+ *         name: abertos
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *         description: >
+ *           Quando `true`, retorna somente atendimentos nao finalizados visiveis para o usuario
+ *           informado (`usuario_id = cod_usuario` ou `usuario_id = null`). Quando `false`,
+ *           retorna somente atendimentos finalizados.
+ *       - in: query
  *         name: cod_usuario
  *         required: false
  *         schema:
  *           type: integer
  *         description: >
- *           Necessario para visualizar atendimentos `em_atendimento` vinculados ao proprio usuario.
+ *           Necessario para visualizar atendimentos vinculados ao proprio usuario. Com `abertos=true`,
+ *           tambem inclui atendimentos sem vinculo com nenhum usuario.
  *       - in: query
  *         name: contato_id
  *         required: false

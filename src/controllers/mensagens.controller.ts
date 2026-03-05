@@ -349,6 +349,36 @@ function canAccessAtendimento(atendimento: { status: string; usuario_id: number 
   return atendimento.usuario_id === codUsuario;
 }
 
+function parseBooleanQuery(value: unknown): boolean | null {
+  const normalized = asNullableString(value)?.toLowerCase() ?? null;
+  if (!normalized) return null;
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  return null;
+}
+
+function buildVisibleOwnershipFilter(codUsuario: number | null) {
+  return [
+    { usuario_id: null },
+    ...(codUsuario ? [{ usuario_id: codUsuario }] : []),
+  ];
+}
+
+function buildVisibleInProgressFilter(codUsuario: number | null) {
+  return {
+    status: STATUS_EM_ATENDIMENTO,
+    OR: buildVisibleOwnershipFilter(codUsuario),
+  };
+}
+
+function buildOpenAtendimentosFilter(codUsuario: number | null) {
+  const ownership = buildVisibleOwnershipFilter(codUsuario);
+  return [
+    { status: STATUS_ABERTO, OR: ownership },
+    { status: STATUS_EM_ATENDIMENTO, OR: ownership },
+  ];
+}
+
 function parseStatusAtendimento(value: unknown): typeof STATUS_ABERTO | typeof STATUS_EM_ATENDIMENTO | typeof STATUS_FINALIZADO | null {
   const status = asNullableString(value)?.toLowerCase() ?? null;
   if (!status) return null;
@@ -840,6 +870,8 @@ export async function listarAtendimentos(req: Request, res: Response) {
     const cod_loja = asPositiveInt(req.query?.cod_loja);
     const cod_usuario = asNullablePositiveInt(req.query?.cod_usuario);
     const contato_id = asNullablePositiveInt(req.query?.contato_id);
+    const abertosRaw = req.query?.abertos;
+    const abertos = parseBooleanQuery(abertosRaw);
     const statusInput = asNullableString(req.query?.status);
     const status = parseStatusAtendimento(statusInput);
     const ult_id_recebido_raw = req.query?.ult_id_recebido;
@@ -849,6 +881,14 @@ export async function listarAtendimentos(req: Request, res: Response) {
 
     if (!cod_loja) {
       return res.status(400).json({ error: 'Campo cod_loja e obrigatorio.' });
+    }
+    if (
+      abertosRaw !== undefined &&
+      abertosRaw !== null &&
+      abertosRaw !== '' &&
+      abertos === null
+    ) {
+      return res.status(400).json({ error: "Campo abertos deve ser 'true' ou 'false'." });
     }
     if (statusInput && !status) {
       return res.status(400).json({ error: "Campo status deve ser 'aberto', 'em_atendimento' ou 'finalizado'." });
@@ -877,25 +917,19 @@ export async function listarAtendimentos(req: Request, res: Response) {
           id: { gt: ult_id_recebido },
         },
       };
+    } else if (abertos === true) {
+      where.OR = buildOpenAtendimentosFilter(cod_usuario);
+    } else if (abertos === false) {
+      where.status = STATUS_FINALIZADO;
     } else if (status === STATUS_EM_ATENDIMENTO) {
-      where.status = STATUS_EM_ATENDIMENTO;
-      where.OR = [
-        { usuario_id: null },
-        ...(cod_usuario ? [{ usuario_id: cod_usuario }] : []),
-      ];
+      Object.assign(where, buildVisibleInProgressFilter(cod_usuario));
     } else if (status === STATUS_ABERTO || status === STATUS_FINALIZADO) {
       where.status = status;
     } else {
       where.OR = [
         { status: STATUS_ABERTO },
         { status: STATUS_FINALIZADO },
-        {
-          status: STATUS_EM_ATENDIMENTO,
-          OR: [
-            { usuario_id: null },
-            ...(cod_usuario ? [{ usuario_id: cod_usuario }] : []),
-          ],
-        },
+        buildVisibleInProgressFilter(cod_usuario),
       ];
     }
 
