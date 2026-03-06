@@ -28,6 +28,7 @@ model loja {
   evolution_apikey   String?   @unique @db.VarChar(255)
   usuarios           usuario[]
   produtos           produto[]
+  status_fluxos      status_fluxo[]
 }
 
 model usuario {
@@ -225,6 +226,7 @@ model atendimento {
   usuario_id    Int?
   origem        String             @default("whatsapp") @db.VarChar(50)
   status        status_atendimento @default(aberto)
+  status_fluxo  String?            @db.VarChar(100)
   aberto_em     DateTime           @default(now())
   iniciado_em   DateTime?
   finalizado_em DateTime?
@@ -238,6 +240,22 @@ model atendimento {
   @@index([cod_loja, contato_id, status])
   @@index([cod_loja, usuario_id, status])
   @@map("atendimentos")
+}
+
+model status_fluxo {
+  id         Int      @id @default(autoincrement())
+  cod_loja   Int
+  nome       String   @db.VarChar(100)
+  cor        String   @db.VarChar(20)
+  ordem      Int      @default(0)
+  ativo      Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  loja       loja     @relation(fields: [cod_loja], references: [codigo], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([cod_loja, nome])
+  @@index([cod_loja, ativo, ordem])
+  @@map("status_fluxo")
 }
 
 model mensagem {

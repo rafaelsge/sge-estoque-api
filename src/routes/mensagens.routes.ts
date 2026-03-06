@@ -204,6 +204,8 @@ router.post('/enviar', enviarMensagem);
  *                   usuario_id: 7
  *                   origem: "whatsapp"
  *                   status: "em_atendimento"
+ *                   status_fluxo: "em_preparo"
+ *                   status_fluxo_cor: "#FF8800"
  *                   aberto_em: "2026-02-13T12:00:00.000Z"
  *                   iniciado_em: "2026-02-13T12:01:00.000Z"
  *                   finalizado_em: null
@@ -356,6 +358,11 @@ router.patch('/contato/:contato_id/cliente', vincularContatoCliente);
  * /mensagens/atendimento/{atendimento_id}/status:
  *   post:
  *     summary: Atualiza etapa do atendimento
+ *     description: >
+ *       O campo `status` recebido e armazenado em `status_fluxo`. Apenas `iniciado`
+ *       e `finalizado` disparam mudancas no `status` interno do atendimento; etapas
+ *       intermediarias precisam estar cadastradas por loja em `/status-fluxo` e sao
+ *       retornadas nas consultas com sua cor configurada.
  *     tags: [Mensagens]
  *     parameters:
  *       - in: path
@@ -370,7 +377,7 @@ router.patch('/contato/:contato_id/cliente', vincularContatoCliente);
  *           example:
  *             cod_loja: 3
  *             cod_usuario: 7
- *             status: "iniciado"
+ *             status: "em_preparo"
  *     responses:
  *       200:
  *         description: Status do atendimento atualizado

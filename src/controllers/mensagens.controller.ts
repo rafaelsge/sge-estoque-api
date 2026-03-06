@@ -12,11 +12,6 @@ const STATUS_ATENDIMENTO_VALIDOS = new Set([
 const STATUS_FLUXO_INICIADO = 'iniciado' as const;
 const STATUS_FLUXO_AGUARDANDO = 'aguardando' as const;
 const STATUS_FLUXO_FINALIZADO = 'finalizado' as const;
-const STATUS_FLUXO_VALIDOS = new Set([
-  STATUS_FLUXO_INICIADO,
-  STATUS_FLUXO_AGUARDANDO,
-  STATUS_FLUXO_FINALIZADO,
-]);
 
 function payloadPreview(payload: unknown, max = 6000): string {
   try {
@@ -386,17 +381,86 @@ function parseStatusAtendimento(value: unknown): typeof STATUS_ABERTO | typeof S
   return status as any;
 }
 
-function parseStatusFluxo(value: unknown): typeof STATUS_FLUXO_INICIADO | typeof STATUS_FLUXO_AGUARDANDO | typeof STATUS_FLUXO_FINALIZADO | null {
-  const status = asNullableString(value)?.toLowerCase() ?? null;
-  if (!status) return null;
-  if (!STATUS_FLUXO_VALIDOS.has(status as any)) return null;
-  return status as any;
+function parseStatusFluxo(value: unknown): string | null {
+  return asNullableString(value);
 }
 
 function mapStatusDbToFluxo(statusDb: string): typeof STATUS_FLUXO_INICIADO | typeof STATUS_FLUXO_AGUARDANDO | typeof STATUS_FLUXO_FINALIZADO {
   if (statusDb === STATUS_EM_ATENDIMENTO) return STATUS_FLUXO_INICIADO;
   if (statusDb === STATUS_FINALIZADO) return STATUS_FLUXO_FINALIZADO;
   return STATUS_FLUXO_AGUARDANDO;
+}
+
+function normalizeStatusFluxo(statusFluxo: string | null): string | null {
+  return statusFluxo?.trim().toLowerCase() ?? null;
+}
+
+function resolveStatusFluxo(atendimento: { status: string; status_fluxo?: string | null }): string {
+  return atendimento.status_fluxo ?? mapStatusDbToFluxo(atendimento.status);
+}
+
+async function carregarStatusFluxoMap(codLoja: number, statusFluxoValores: string[]) {
+  const nomes = Array.from(
+    new Set(
+      statusFluxoValores
+        .map((statusFluxo) => normalizeStatusFluxo(statusFluxo))
+        .filter((statusFluxo): statusFluxo is string => Boolean(statusFluxo)),
+    ),
+  );
+
+  if (nomes.length === 0) {
+    return new Map<string, { nome: string; cor: string; ativo: boolean }>();
+  }
+
+  const cadastros = await prisma.status_fluxo.findMany({
+    where: {
+      cod_loja: codLoja,
+      nome: { in: nomes },
+    },
+    select: {
+      nome: true,
+      cor: true,
+      ativo: true,
+    },
+  });
+
+  return new Map(
+    cadastros.map((cadastro) => [normalizeStatusFluxo(cadastro.nome)!, cadastro]),
+  );
+}
+
+function serializeAtendimento(
+  atendimento: any,
+  statusFluxoMap: Map<string, { nome: string; cor: string; ativo: boolean }>,
+) {
+  const status_fluxo = resolveStatusFluxo(atendimento);
+  const statusFluxoCadastro = statusFluxoMap.get(normalizeStatusFluxo(status_fluxo) ?? '');
+
+  return {
+    id: atendimento.id,
+    cod_loja: atendimento.cod_loja,
+    contato_id: atendimento.contato_id,
+    cliente_codigo: atendimento.cliente_codigo,
+    usuario_id: atendimento.usuario_id,
+    origem: atendimento.origem,
+    status: atendimento.status,
+    status_fluxo,
+    status_fluxo_cor: statusFluxoCadastro?.cor ?? null,
+    aberto_em: atendimento.aberto_em,
+    iniciado_em: atendimento.iniciado_em,
+    finalizado_em: atendimento.finalizado_em,
+    created_at: atendimento.created_at,
+    updated_at: atendimento.updated_at,
+    total_mensagens: atendimento._count?.mensagens ?? undefined,
+    contato: atendimento.contato
+      ? {
+          id: atendimento.contato.id,
+          contato: atendimento.contato.contato,
+          telefone: atendimento.contato.telefone,
+          tipo: atendimento.contato.tipo,
+        }
+      : null,
+  };
 }
 
 export async function webhookMensagem(req: Request, res: Response) {
@@ -581,6 +645,7 @@ export async function webhookMensagem(req: Request, res: Response) {
             cliente_codigo: cliente_codigo ?? contato.cliente_codigo,
             origem,
             status: STATUS_ABERTO,
+            status_fluxo: STATUS_FLUXO_AGUARDANDO,
           },
         });
         novo_atendimento = true;
@@ -681,6 +746,7 @@ export async function enviarMensagem(req: Request, res: Response) {
           where: { id: atendimento.id },
           data: {
             status: STATUS_EM_ATENDIMENTO,
+            status_fluxo: STATUS_FLUXO_INICIADO,
             usuario_id,
             iniciado_em: new Date(),
           },
@@ -772,14 +838,13 @@ export async function listarMensagensAtendimento(req: Request, res: Response) {
       take: limit,
     });
 
+    const statusFluxoMap = await carregarStatusFluxoMap(cod_loja, [resolveStatusFluxo(atendimento)]);
+
     return res.json({
       total,
       data: mensagens,
       atendimento: {
-        id: atendimento.id,
-        status: atendimento.status,
-        usuario_id: atendimento.usuario_id,
-        contato_id: atendimento.contato_id,
+        ...serializeAtendimento(atendimento, statusFluxoMap),
         contato: atendimento.contato?.contato ?? null,
         telefone: atendimento.contato?.telefone ?? null,
       },
@@ -945,31 +1010,14 @@ export async function listarAtendimentos(req: Request, res: Response) {
       take: limit,
     });
 
+    const statusFluxoMap = await carregarStatusFluxoMap(
+      cod_loja,
+      atendimentos.map((atendimento) => resolveStatusFluxo(atendimento)),
+    );
+
     return res.json({
       total,
-      data: atendimentos.map((a) => ({
-        id: a.id,
-        cod_loja: a.cod_loja,
-        contato_id: a.contato_id,
-        cliente_codigo: a.cliente_codigo,
-        usuario_id: a.usuario_id,
-        origem: a.origem,
-        status: a.status,
-        aberto_em: a.aberto_em,
-        iniciado_em: a.iniciado_em,
-        finalizado_em: a.finalizado_em,
-        created_at: a.created_at,
-        updated_at: a.updated_at,
-        total_mensagens: a._count.mensagens,
-        contato: a.contato
-          ? {
-              id: a.contato.id,
-              contato: a.contato.contato,
-              telefone: a.contato.telefone,
-              tipo: a.contato.tipo,
-            }
-          : null,
-      })),
+      data: atendimentos.map((atendimento) => serializeAtendimento(atendimento, statusFluxoMap)),
       nextOffset: offset + limit < total ? offset + limit : null,
     });
   } catch (error) {
@@ -1096,10 +1144,13 @@ export async function atualizarStatusAtendimento(req: Request, res: Response) {
     const cod_usuario = asNullablePositiveInt(req.body?.cod_usuario);
     const atendimento_id = asPositiveInt(req.params?.atendimento_id);
     const status_fluxo = parseStatusFluxo(req.body?.status);
+    const statusFluxoNormalizado = normalizeStatusFluxo(status_fluxo);
+    const isStatusIniciado = statusFluxoNormalizado === STATUS_FLUXO_INICIADO;
+    const isStatusFinalizado = statusFluxoNormalizado === STATUS_FLUXO_FINALIZADO;
 
     if (!cod_loja || !atendimento_id || !status_fluxo) {
       return res.status(400).json({
-        error: "Campos cod_loja, atendimento_id e status sao obrigatorios. status deve ser 'iniciado', 'aguardando' ou 'finalizado'.",
+        error: 'Campos cod_loja, atendimento_id e status sao obrigatorios.',
       });
     }
 
@@ -1110,7 +1161,37 @@ export async function atualizarStatusAtendimento(req: Request, res: Response) {
       return res.status(404).json({ error: 'Atendimento nao encontrado.' });
     }
 
-    if (status_fluxo !== STATUS_FLUXO_FINALIZADO && atendimento.status === STATUS_FINALIZADO) {
+    let statusFluxoCadastro: { nome: string; cor: string } | null = null;
+    if (!isStatusIniciado && !isStatusFinalizado) {
+      statusFluxoCadastro = await prisma.status_fluxo.findFirst({
+        where: {
+          cod_loja,
+          nome: status_fluxo,
+          ativo: true,
+        },
+        select: {
+          nome: true,
+          cor: true,
+        },
+      });
+
+      if (!statusFluxoCadastro) {
+        return res.status(400).json({ error: 'Status de fluxo nao cadastrado ou inativo para a loja.' });
+      }
+    } else {
+      statusFluxoCadastro = await prisma.status_fluxo.findFirst({
+        where: {
+          cod_loja,
+          nome: status_fluxo,
+        },
+        select: {
+          nome: true,
+          cor: true,
+        },
+      });
+    }
+
+    if (isStatusIniciado && atendimento.status === STATUS_FINALIZADO) {
       return res.status(400).json({ error: 'Atendimento finalizado nao pode voltar para outra etapa.' });
     }
 
@@ -1119,21 +1200,20 @@ export async function atualizarStatusAtendimento(req: Request, res: Response) {
     }
 
     const usuarioEfetivo = cod_usuario ?? atendimento.usuario_id ?? null;
-    if (atendimento.status === STATUS_ABERTO && !usuarioEfetivo) {
+    if (isStatusIniciado && atendimento.status === STATUS_ABERTO && !usuarioEfetivo) {
       return res.status(400).json({
         error: 'Campo cod_usuario e obrigatorio para mover atendimento aberto sem usuario definido.',
       });
     }
 
-    const dataUpdate: any = {};
-    if (status_fluxo === STATUS_FLUXO_INICIADO) {
+    const dataUpdate: any = {
+      status_fluxo: statusFluxoCadastro?.nome ?? status_fluxo,
+    };
+    if (isStatusIniciado) {
       dataUpdate.status = STATUS_EM_ATENDIMENTO;
       dataUpdate.usuario_id = usuarioEfetivo;
       dataUpdate.iniciado_em = atendimento.iniciado_em ?? new Date();
-    } else if (status_fluxo === STATUS_FLUXO_AGUARDANDO) {
-      dataUpdate.status = STATUS_ABERTO;
-      dataUpdate.usuario_id = usuarioEfetivo;
-    } else {
+    } else if (isStatusFinalizado) {
       dataUpdate.status = STATUS_FINALIZADO;
       dataUpdate.usuario_id = usuarioEfetivo ?? atendimento.usuario_id;
       dataUpdate.finalizado_em = atendimento.finalizado_em ?? new Date();
@@ -1147,7 +1227,8 @@ export async function atualizarStatusAtendimento(req: Request, res: Response) {
     return res.json({
       message: 'Status do atendimento atualizado com sucesso.',
       id: atualizado.id,
-      status_fluxo,
+      status_fluxo: atualizado.status_fluxo,
+      status_fluxo_cor: statusFluxoCadastro?.cor ?? null,
       status: atualizado.status,
       usuario_id: atualizado.usuario_id,
       iniciado_em: atualizado.iniciado_em,
@@ -1185,10 +1266,13 @@ export async function transferirUsuarioAtendimento(req: Request, res: Response) 
       return res.status(403).json({ error: 'Atendimento em posse de outro usuario.' });
     }
     if (atendimento.usuario_id === cod_usuario_destino) {
+      const statusFluxoMap = await carregarStatusFluxoMap(cod_loja, [resolveStatusFluxo(atendimento)]);
+      const statusFluxoCadastro = statusFluxoMap.get(normalizeStatusFluxo(resolveStatusFluxo(atendimento)) ?? '');
       return res.json({
         message: 'Atendimento ja esta vinculado ao usuario informado.',
         id: atendimento.id,
-        status_fluxo: mapStatusDbToFluxo(atendimento.status),
+        status_fluxo: resolveStatusFluxo(atendimento),
+        status_fluxo_cor: statusFluxoCadastro?.cor ?? null,
         status: atendimento.status,
         usuario_id: atendimento.usuario_id,
       });
@@ -1201,10 +1285,14 @@ export async function transferirUsuarioAtendimento(req: Request, res: Response) 
       },
     });
 
+    const statusFluxoMap = await carregarStatusFluxoMap(cod_loja, [resolveStatusFluxo(atualizado)]);
+    const statusFluxoCadastro = statusFluxoMap.get(normalizeStatusFluxo(resolveStatusFluxo(atualizado)) ?? '');
+
     return res.json({
       message: 'Usuario do atendimento transferido com sucesso.',
       id: atualizado.id,
-      status_fluxo: mapStatusDbToFluxo(atualizado.status),
+      status_fluxo: resolveStatusFluxo(atualizado),
+      status_fluxo_cor: statusFluxoCadastro?.cor ?? null,
       status: atualizado.status,
       usuario_id: atualizado.usuario_id,
     });
