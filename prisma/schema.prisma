@@ -207,6 +207,8 @@ model contato {
   contato       String   @db.VarChar(100)
   telefone      String   @db.VarChar(50)
   tipo          String?  @db.VarChar(20)
+  profile_picture_url String?  @db.LongText
+  profile_picture_checked_at DateTime?
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
   atendimentos  atendimento[]
@@ -278,6 +280,69 @@ model mensagem {
   @@index([cod_loja, contato_id])
   @@index([cod_loja, criado_em])
   @@map("mensagens")
+}
+
+model mensagem_ingestao {
+  id                       Int                       @id @default(autoincrement())
+  cod_loja                 Int?
+  instance_name            String                    @db.VarChar(100)
+  message_id               String                    @db.VarChar(191)
+  remote_jid               String?                   @db.VarChar(255)
+  chat_jid                 String?                   @db.VarChar(255)
+  contact_jid              String?                   @db.VarChar(255)
+  contact_phone_normalized String?                   @db.VarChar(30)
+  sender_jid               String?                   @db.VarChar(255)
+  participant_jid          String?                   @db.VarChar(255)
+  attendance_id            Int?
+  contato_id               Int?
+  legacy_mensagem_id       Int?
+  from_me                  Boolean                   @default(false)
+  direction                direcao_mensagem         @default(entrada)
+  message_type             String                    @default("desconhecido") @db.VarChar(50)
+  message_text             String?                   @db.LongText
+  caption                  String?                   @db.LongText
+  media_url                String?                   @db.LongText
+  media_mime_type          String?                   @db.VarChar(150)
+  media_file_name          String?                   @db.VarChar(255)
+  quoted_message_id        String?                   @db.VarChar(191)
+  quoted_message_text      String?                   @db.LongText
+  quoted_remote_jid        String?                   @db.VarChar(255)
+  status                   String                    @default("received") @db.VarChar(50)
+  message_timestamp        DateTime?
+  push_name                String?                   @db.VarChar(255)
+  payload_raw_json         String                    @db.LongText
+  source_event_type        String                    @db.VarChar(100)
+  received_at              DateTime                  @default(now())
+  processed_at             DateTime?
+  deleted_at               DateTime?
+  edited_at                DateTime?
+  created_at               DateTime                  @default(now())
+  updated_at               DateTime                  @updatedAt
+  eventos                  mensagem_ingestao_evento[]
+
+  @@unique([instance_name, message_id])
+  @@index([attendance_id])
+  @@index([remote_jid])
+  @@index([quoted_message_id])
+  @@index([cod_loja])
+  @@map("mensagens_ingestao")
+}
+
+model mensagem_ingestao_evento {
+  id                  Int                @id @default(autoincrement())
+  mensagem_ingestao_id Int?
+  instance_name       String?            @db.VarChar(100)
+  message_id          String?            @db.VarChar(191)
+  source_event_type   String             @db.VarChar(100)
+  payload_raw_json    String             @db.LongText
+  received_at         DateTime           @default(now())
+  processed_at        DateTime?
+  created_at          DateTime           @default(now())
+  mensagem_ingestao   mensagem_ingestao? @relation(fields: [mensagem_ingestao_id], references: [id], onDelete: SetNull)
+
+  @@index([mensagem_ingestao_id])
+  @@index([instance_name, message_id])
+  @@map("mensagens_ingestao_eventos")
 }
 
 model pedido_restaurante {

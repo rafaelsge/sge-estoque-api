@@ -1,11 +1,13 @@
 ﻿import { Router } from 'express';
 import {
   webhookMensagem,
+  consultarMensagemPorMessageId,
   enviarMensagem,
   listarMensagensAtendimento,
   listarMensagensContato,
   listarAtendimentos,
   ajustarNomeContato,
+  atualizarFotoContato,
   vincularContatoCliente,
   atualizarStatusAtendimento,
   transferirUsuarioAtendimento,
@@ -81,6 +83,30 @@ const router = Router();
  */
 router.post('/webhook', webhookMensagem);
 router.post(/^\/webhook(?:\/.*)?$/, webhookMensagem);
+
+/**
+ * @swagger
+ * /mensagens/interna/message-id/{message_id}:
+ *   get:
+ *     summary: Consulta a mensagem canonica por message_id
+ *     tags: [Mensagens]
+ *     parameters:
+ *       - in: path
+ *         name: message_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: instance_name
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Obrigatorio quando o mesmo message_id existir em mais de uma instancia
+ *     responses:
+ *       200:
+ *         description: Mensagem canonica encontrada
+ */
+router.get('/interna/message-id/:message_id', consultarMensagemPorMessageId);
 
 /**
  * @swagger
@@ -327,6 +353,31 @@ router.get('/contato/:contato_id', listarMensagensContato);
  *         description: Nome atualizado
  */
 router.patch('/contato/:contato_id/nome', ajustarNomeContato);
+
+/**
+ * @swagger
+ * /mensagens/contato/{contato_id}/foto:
+ *   patch:
+ *     summary: Atualiza a URL da foto de perfil do contato
+ *     tags: [Mensagens]
+ *     parameters:
+ *       - in: path
+ *         name: contato_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             cod_loja: 3
+ *             profile_picture_url: "https://cdn.exemplo.com/avatar.jpg"
+ *     responses:
+ *       200:
+ *         description: Foto atualizada
+ */
+router.patch('/contato/:contato_id/foto', atualizarFotoContato);
 
 /**
  * @swagger

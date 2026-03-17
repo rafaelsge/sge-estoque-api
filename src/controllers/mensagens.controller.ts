@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
+import fetch from 'node-fetch';
 import { prisma } from '../prismaClient';
+import { resolveContactName } from '../utils/evolution-contact-name';
 
 const STATUS_ABERTO = 'aberto' as const;
 const STATUS_EM_ATENDIMENTO = 'em_atendimento' as const;
@@ -12,6 +15,45 @@ const STATUS_ATENDIMENTO_VALIDOS = new Set([
 const STATUS_FLUXO_INICIADO = 'iniciado' as const;
 const STATUS_FLUXO_AGUARDANDO = 'aguardando' as const;
 const STATUS_FLUXO_FINALIZADO = 'finalizado' as const;
+const PROFILE_PICTURE_TTL_MS = 6 * 60 * 60 * 1000;
+const PROFILE_PICTURE_FETCH_TIMEOUT_MS = 10000;
+type PrismaDbClient = Prisma.TransactionClient | typeof prisma;
+type NormalizedEvolutionMessage = {
+  instance_name: string | null;
+  message_id: string | null;
+  remote_jid: string | null;
+  chat_jid: string | null;
+  contact_jid: string | null;
+  contact_phone_normalized: string | null;
+  sender_jid: string | null;
+  participant_jid: string | null;
+  from_me: boolean;
+  direction: 'entrada' | 'saida';
+  message_type: string;
+  message_text: string | null;
+  caption: string | null;
+  media_url: string | null;
+  media_mime_type: string | null;
+  media_file_name: string | null;
+  quoted_message_id: string | null;
+  quoted_message_text: string | null;
+  quoted_remote_jid: string | null;
+  status: string;
+  message_timestamp: Date | null;
+  push_name: string | null;
+  payload_raw_json: string;
+  source_event_type: string;
+  received_at: Date;
+  processed_at: Date;
+  arquivo_base64: string | null;
+};
+type ContactProfilePhotoFetchResult = {
+  ok: boolean;
+  statusCode: number | null;
+  wuid: string | null;
+  profilePictureUrl: string | null;
+  reason: string | null;
+};
 
 function payloadPreview(payload: unknown, max = 6000): string {
   try {
@@ -21,6 +63,15 @@ function payloadPreview(payload: unknown, max = 6000): string {
     return `${raw.slice(0, max)}... [truncado ${raw.length - max} chars]`;
   } catch {
     return '[payload nao serializavel]';
+  }
+}
+
+function safeJsonStringify(payload: unknown): string {
+  try {
+    const raw = JSON.stringify(payload ?? null);
+    return raw ?? 'null';
+  } catch {
+    return JSON.stringify({ serialization_error: true });
   }
 }
 
@@ -41,6 +92,13 @@ function asNullableString(value: unknown): string | null {
   return str ? str : null;
 }
 
+function readFirstValue<T>(...values: T[]): T | null {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+
 function normalizePhone(value: unknown): string {
   let raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -52,6 +110,81 @@ function normalizePhone(value: unknown): string {
 
   const digits = raw.replace(/\D/g, '');
   return digits;
+}
+
+function normalizeProfilePictureUrl(value: unknown): string | null {
+  const raw = asNullableString(value);
+  if (!raw) return null;
+
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function shouldRefreshProfilePicture(
+  contato: { profile_picture_url: string | null; profile_picture_checked_at: Date | null } | null,
+  force = false,
+): boolean {
+  if (force) return true;
+  if (!contato) return true;
+  if (!contato.profile_picture_url) {
+    if (!contato.profile_picture_checked_at) return true;
+    return Date.now() - contato.profile_picture_checked_at.getTime() >= PROFILE_PICTURE_TTL_MS;
+  }
+  if (!contato.profile_picture_checked_at) return true;
+  return Date.now() - contato.profile_picture_checked_at.getTime() >= PROFILE_PICTURE_TTL_MS;
+}
+
+function normalizeProfileLookupNumber(value: unknown): string | null {
+  const raw = asNullableString(value);
+  if (!raw) return null;
+
+  if (raw.includes('@')) {
+    const base = raw.split(':')[0].trim();
+    return base || null;
+  }
+
+  const normalizedPhone = normalizePhone(raw);
+  return normalizedPhone || null;
+}
+
+function normalizeJid(value: unknown): string | null {
+  const raw = asNullableString(value);
+  return raw ?? null;
+}
+
+function isGroupJid(value: string | null): boolean {
+  return Boolean(value && value.includes('@g.us'));
+}
+
+function parseMessageTimestamp(value: unknown): Date | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) {
+      return parseMessageTimestamp(Number(trimmed));
+    }
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    const normalized = value < 1e12 ? value * 1000 : value;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  return null;
 }
 
 function parseDirection(value: unknown): 'entrada' | 'saida' | null {
@@ -81,6 +214,10 @@ function extractTextFromPayload(payload: any): string | null {
     payload?.event?.body,
     payload?.event?.message?.conversation,
     payload?.event?.message?.extendedTextMessage?.text,
+    payload?.data?.message?.editedMessage?.message?.conversation,
+    payload?.data?.message?.editedMessage?.message?.extendedTextMessage?.text,
+    payload?.message?.editedMessage?.message?.conversation,
+    payload?.message?.editedMessage?.message?.extendedTextMessage?.text,
   );
 }
 
@@ -103,7 +240,12 @@ function inferTipoFromPayload(payload: any): string | null {
   const tipoInformado = asNullableString(payload?.tipo);
   if (tipoInformado) return tipoInformado;
 
-  const messageObj = payload?.data?.message ?? payload?.message ?? payload?.event?.message;
+  const messageObj =
+    payload?.data?.update?.message ??
+    payload?.update?.message ??
+    payload?.data?.message ??
+    payload?.message ??
+    payload?.event?.message;
   if (!messageObj || typeof messageObj !== 'object') return null;
 
   if (messageObj.conversation || messageObj.extendedTextMessage) return 'texto';
@@ -111,6 +253,10 @@ function inferTipoFromPayload(payload: any): string | null {
   if (messageObj.videoMessage) return 'video';
   if (messageObj.audioMessage) return 'audio';
   if (messageObj.documentMessage) return 'documento';
+  if (messageObj.stickerMessage) return 'sticker';
+  if (messageObj.editedMessage) return 'edicao';
+  if (messageObj.protocolMessage) return 'protocolo';
+  if (messageObj.reactionMessage) return 'reacao';
 
   return null;
 }
@@ -119,6 +265,164 @@ function normalizeUrl(value: unknown): string | null {
   const raw = asNullableString(value);
   if (!raw) return null;
   return raw.replace(/\/+$/, '').toLowerCase();
+}
+
+async function fetchContactProfilePhoto(
+  instanceName: string,
+  remoteJidOrPhone: string,
+  evolutionUrl: string,
+  evolutionApiKey: string,
+): Promise<ContactProfilePhotoFetchResult> {
+  const normalizedLookup = normalizeProfileLookupNumber(remoteJidOrPhone);
+  if (!normalizedLookup) {
+    console.info('[contato/profile-photo] tentativa ignorada: lookup invalido', {
+      instance_name: instanceName,
+      lookup: remoteJidOrPhone,
+    });
+    return {
+      ok: false,
+      statusCode: null,
+      wuid: null,
+      profilePictureUrl: null,
+      reason: 'invalid-number',
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), PROFILE_PICTURE_FETCH_TIMEOUT_MS);
+  const endpoint = `${evolutionUrl}/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`;
+
+  console.info('[contato/profile-photo] tentativa', {
+    instance_name: instanceName,
+    lookup: normalizedLookup,
+  });
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: evolutionApiKey,
+      },
+      body: JSON.stringify({ number: normalizedLookup }),
+      signal: controller.signal,
+    });
+
+    const rawBody = await response.text();
+    let parsedBody: any = null;
+    try {
+      parsedBody = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      parsedBody = null;
+    }
+
+    const result: ContactProfilePhotoFetchResult = {
+      ok: response.ok,
+      statusCode: response.status,
+      wuid: asNullableString(parsedBody?.wuid),
+      profilePictureUrl: normalizeProfilePictureUrl(parsedBody?.profilePictureUrl),
+      reason: response.ok ? null : asNullableString(parsedBody?.message) ?? response.statusText ?? 'request-failed',
+    };
+
+    console.info('[contato/profile-photo] resposta', {
+      instance_name: instanceName,
+      lookup: normalizedLookup,
+      status_code: response.status,
+      wuid: result.wuid,
+      has_profile_picture_url: Boolean(result.profilePictureUrl),
+      reason: result.reason,
+    });
+
+    return result;
+  } catch (error: any) {
+    const reason = error?.name === 'AbortError' ? 'timeout' : 'request-error';
+    console.warn('[contato/profile-photo] falha na consulta', {
+      instance_name: instanceName,
+      lookup: normalizedLookup,
+      reason,
+      error: error?.message ?? String(error),
+    });
+    return {
+      ok: false,
+      statusCode: null,
+      wuid: null,
+      profilePictureUrl: null,
+      reason,
+    };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+async function tryRefreshContactProfilePhoto(params: {
+  contatoId: number;
+  codLoja: number;
+  instanceName?: string | null;
+  remoteJid?: string | null;
+  phone?: string | null;
+  force?: boolean;
+}) {
+  const contato = await prisma.contato.findUnique({
+    where: { id_cod_loja: { id: params.contatoId, cod_loja: params.codLoja } },
+    select: {
+      id: true,
+      cod_loja: true,
+      telefone: true,
+      profile_picture_url: true,
+      profile_picture_checked_at: true,
+    },
+  });
+
+  if (!contato) return null;
+  if (!shouldRefreshProfilePicture(contato, params.force)) return contato;
+
+  const loja = await prisma.loja.findFirst({
+    where: { codigo: params.codLoja },
+    select: {
+      evolution_url: true,
+      evolution_instancia: true,
+      evolution_apikey: true,
+    },
+  });
+
+  const instanceName = params.instanceName ?? loja?.evolution_instancia ?? null;
+  const evolutionUrl = normalizeUrl(loja?.evolution_url);
+  const evolutionApiKey = asNullableString(loja?.evolution_apikey);
+  const lookup = params.remoteJid ?? params.phone ?? contato.telefone;
+
+  if (!instanceName || !evolutionUrl || !evolutionApiKey || !lookup) {
+    console.info('[contato/profile-photo] tentativa ignorada: configuracao incompleta', {
+      contato_id: params.contatoId,
+      cod_loja: params.codLoja,
+      has_instance: Boolean(instanceName),
+      has_url: Boolean(evolutionUrl),
+      has_lookup: Boolean(lookup),
+      has_apikey: Boolean(evolutionApiKey),
+    });
+    await prisma.contato.update({
+      where: { id: contato.id },
+      data: {
+        profile_picture_checked_at: new Date(),
+      },
+    });
+    return contato;
+  }
+
+  const result = await fetchContactProfilePhoto(instanceName, lookup, evolutionUrl, evolutionApiKey);
+
+  await prisma.contato.update({
+    where: { id: contato.id },
+    data: {
+      profile_picture_url: result.profilePictureUrl ?? undefined,
+      profile_picture_checked_at: new Date(),
+    },
+  });
+
+  return {
+    ...contato,
+    profile_picture_url: result.profilePictureUrl ?? contato.profile_picture_url,
+    profile_picture_checked_at: new Date(),
+  };
 }
 
 function readFirstString(...values: unknown[]): string | null {
@@ -331,6 +635,535 @@ function extractPhoneFromPayload(payload: any, fromMe: boolean): string | null {
   );
 }
 
+function extractSourceEventType(payload: any, requestPath: string): string {
+  const routeEvent = requestPath
+    .split('/webhook/')
+    .map((part) => part.trim())
+    .find(Boolean);
+
+  return readFirstString(
+    payload?.event,
+    payload?.eventType,
+    payload?.data?.event,
+    payload?.data?.eventType,
+    routeEvent,
+  ) ?? 'messages.upsert';
+}
+
+function extractMessageObject(payload: any): any {
+  return (
+    payload?.data?.update?.message ??
+    payload?.update?.message ??
+    payload?.data?.message ??
+    payload?.message ??
+    payload?.event?.message ??
+    null
+  );
+}
+
+function extractContextInfo(payload: any): any {
+  const messageObj = extractMessageObject(payload);
+  if (!messageObj || typeof messageObj !== 'object') return null;
+
+  const candidates = [
+    messageObj.extendedTextMessage?.contextInfo,
+    messageObj.imageMessage?.contextInfo,
+    messageObj.videoMessage?.contextInfo,
+    messageObj.documentMessage?.contextInfo,
+    messageObj.audioMessage?.contextInfo,
+    messageObj.buttonsResponseMessage?.contextInfo,
+    messageObj.listResponseMessage?.contextInfo,
+    messageObj.templateButtonReplyMessage?.contextInfo,
+    messageObj.editedMessage?.message?.extendedTextMessage?.contextInfo,
+    messageObj.editedMessage?.message?.imageMessage?.contextInfo,
+    messageObj.editedMessage?.message?.videoMessage?.contextInfo,
+    messageObj.editedMessage?.message?.documentMessage?.contextInfo,
+  ];
+
+  return candidates.find((candidate) => candidate && typeof candidate === 'object') ?? null;
+}
+
+function extractRemoteJidFromPayload(payload: any): string | null {
+  return normalizeJid(
+    readFirstString(
+      payload?.data?.remoteJid,
+      payload?.remoteJid,
+      payload?.data?.key?.remoteJid,
+      payload?.key?.remoteJid,
+      payload?.data?.keys?.[0]?.remoteJid,
+      payload?.keys?.[0]?.remoteJid,
+      payload?.data?.message?.protocolMessage?.key?.remoteJid,
+      payload?.message?.protocolMessage?.key?.remoteJid,
+    ),
+  );
+}
+
+function extractParticipantJidFromPayload(payload: any): string | null {
+  return normalizeJid(
+    readFirstString(
+      payload?.data?.participant,
+      payload?.participant,
+      payload?.data?.key?.participant,
+      payload?.key?.participant,
+      payload?.data?.keys?.[0]?.participant,
+      payload?.keys?.[0]?.participant,
+    ),
+  );
+}
+
+function extractChatJidFromPayload(payload: any, remoteJid: string | null): string | null {
+  return normalizeJid(
+    readFirstString(
+      payload?.data?.remoteJid,
+      payload?.remoteJid,
+      payload?.data?.key?.remoteJid,
+      payload?.key?.remoteJid,
+      payload?.data?.keys?.[0]?.remoteJid,
+      payload?.keys?.[0]?.remoteJid,
+      extractContextInfo(payload)?.remoteJid,
+      remoteJid,
+    ),
+  );
+}
+
+function extractSenderJidFromPayload(payload: any, remoteJid: string | null, participantJid: string | null): string | null {
+  return normalizeJid(
+    readFirstString(
+      payload?.data?.senderJid,
+      payload?.senderJid,
+      payload?.data?.sender,
+      payload?.sender,
+      participantJid,
+      !isGroupJid(remoteJid) ? remoteJid : null,
+    ),
+  );
+}
+
+function resolveContactJid(
+  remoteJid: string | null,
+  chatJid: string | null,
+  participantJid: string | null,
+  senderJid: string | null,
+): string | null {
+  if (isGroupJid(chatJid ?? remoteJid)) {
+    return participantJid ?? senderJid ?? null;
+  }
+  return remoteJid ?? senderJid ?? null;
+}
+
+function isDeleteEvent(payload: any, sourceEventType: string): boolean {
+  const normalizedEvent = sourceEventType.toLowerCase();
+  const protocolType = String(
+    readFirstValue(
+      payload?.data?.message?.protocolMessage?.type,
+      payload?.message?.protocolMessage?.type,
+      payload?.data?.update?.message?.protocolMessage?.type,
+      payload?.update?.message?.protocolMessage?.type,
+    ) ?? '',
+  ).toUpperCase();
+
+  return (
+    normalizedEvent.includes('delete') ||
+    normalizedEvent.includes('revoke') ||
+    protocolType === 'REVOKE' ||
+    protocolType === '0'
+  );
+}
+
+function isEditedEvent(payload: any, sourceEventType: string): boolean {
+  const normalizedEvent = sourceEventType.toLowerCase();
+  return (
+    normalizedEvent.includes('edit') ||
+    Boolean(payload?.data?.message?.editedMessage) ||
+    Boolean(payload?.message?.editedMessage) ||
+    Boolean(payload?.data?.update?.message?.editedMessage) ||
+    Boolean(payload?.update?.message?.editedMessage)
+  );
+}
+
+function extractMessageId(payload: any, sourceEventType: string): string | null {
+  if (isDeleteEvent(payload, sourceEventType)) {
+    return readFirstString(
+      payload?.data?.message?.protocolMessage?.key?.id,
+      payload?.message?.protocolMessage?.key?.id,
+      payload?.data?.keys?.[0]?.id,
+      payload?.keys?.[0]?.id,
+      payload?.data?.keyId,
+      payload?.data?.key?.id,
+      payload?.key?.id,
+    );
+  }
+
+  if (sourceEventType.toLowerCase().includes('update')) {
+    return readFirstString(
+      payload?.data?.keyId,
+      payload?.data?.key?.id,
+      payload?.key?.id,
+      payload?.data?.messages?.[0]?.key?.id,
+      payload?.messages?.[0]?.key?.id,
+      payload?.data?.id,
+      payload?.id,
+    );
+  }
+
+  return readFirstString(
+    payload?.data?.key?.id,
+    payload?.key?.id,
+    payload?.data?.messages?.[0]?.key?.id,
+    payload?.messages?.[0]?.key?.id,
+    payload?.data?.messageId,
+    payload?.messageId,
+    payload?.data?.id,
+    payload?.id,
+  );
+}
+
+function extractCaptionFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.caption,
+    payload?.data?.caption,
+    payload?.message?.imageMessage?.caption,
+    payload?.message?.videoMessage?.caption,
+    payload?.data?.message?.imageMessage?.caption,
+    payload?.data?.message?.videoMessage?.caption,
+    payload?.event?.message?.imageMessage?.caption,
+    payload?.event?.message?.videoMessage?.caption,
+    payload?.data?.message?.editedMessage?.message?.imageMessage?.caption,
+    payload?.data?.message?.editedMessage?.message?.videoMessage?.caption,
+    payload?.message?.editedMessage?.message?.imageMessage?.caption,
+    payload?.message?.editedMessage?.message?.videoMessage?.caption,
+  );
+}
+
+function extractMediaUrlFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.mediaUrl,
+    payload?.media_url,
+    payload?.data?.mediaUrl,
+    payload?.data?.media_url,
+    payload?.message?.imageMessage?.url,
+    payload?.message?.videoMessage?.url,
+    payload?.message?.audioMessage?.url,
+    payload?.message?.documentMessage?.url,
+    payload?.data?.message?.imageMessage?.url,
+    payload?.data?.message?.videoMessage?.url,
+    payload?.data?.message?.audioMessage?.url,
+    payload?.data?.message?.documentMessage?.url,
+    payload?.data?.message?.editedMessage?.message?.imageMessage?.url,
+    payload?.data?.message?.editedMessage?.message?.videoMessage?.url,
+    payload?.data?.message?.editedMessage?.message?.documentMessage?.url,
+  );
+}
+
+function extractMediaFileNameFromPayload(payload: any): string | null {
+  return readFirstString(
+    payload?.fileName,
+    payload?.filename,
+    payload?.data?.fileName,
+    payload?.data?.filename,
+    payload?.message?.documentMessage?.fileName,
+    payload?.data?.message?.documentMessage?.fileName,
+    payload?.data?.message?.editedMessage?.message?.documentMessage?.fileName,
+  );
+}
+
+function extractQuotedMessageId(payload: any): string | null {
+  const contextInfo = extractContextInfo(payload);
+  return readFirstString(
+    contextInfo?.stanzaId,
+    payload?.data?.quoted?.key?.id,
+    payload?.quoted?.key?.id,
+    payload?.data?.quotedMessage?.key?.id,
+    payload?.quotedMessage?.key?.id,
+  );
+}
+
+function extractQuotedMessageText(payload: any): string | null {
+  const contextInfo = extractContextInfo(payload);
+  const quotedMessage =
+    contextInfo?.quotedMessage ??
+    payload?.data?.quotedMessage?.message ??
+    payload?.quotedMessage?.message ??
+    payload?.data?.quoted?.message ??
+    payload?.quoted?.message;
+
+  return readFirstString(
+    quotedMessage?.conversation,
+    quotedMessage?.extendedTextMessage?.text,
+    quotedMessage?.imageMessage?.caption,
+    quotedMessage?.videoMessage?.caption,
+    quotedMessage?.documentMessage?.caption,
+  );
+}
+
+function extractQuotedRemoteJid(payload: any, chatJid: string | null): string | null {
+  const contextInfo = extractContextInfo(payload);
+  return normalizeJid(
+    readFirstString(
+      contextInfo?.remoteJid,
+      contextInfo?.participant,
+      payload?.data?.quoted?.key?.remoteJid,
+      payload?.quoted?.key?.remoteJid,
+      chatJid,
+    ),
+  );
+}
+
+function extractMessageStatus(payload: any, sourceEventType: string, fromMe: boolean): string {
+  const explicitStatus = asNullableString(
+    readFirstValue(
+      payload?.status,
+      payload?.data?.status,
+      payload?.event?.status,
+      payload?.data?.messageStatus,
+      payload?.messageStatus,
+      payload?.data?.ack,
+      payload?.ack,
+    ),
+  );
+
+  if (isDeleteEvent(payload, sourceEventType)) return 'deleted';
+  if (isEditedEvent(payload, sourceEventType)) return 'edited';
+  if (sourceEventType.toLowerCase().includes('update')) {
+    return explicitStatus?.toLowerCase() ?? 'updated';
+  }
+
+  return explicitStatus?.toLowerCase() ?? (fromMe ? 'sent' : 'received');
+}
+
+function extractNormalizedMessage(payload: any, requestPath: string, receivedAt: Date): NormalizedEvolutionMessage {
+  const source_event_type = extractSourceEventType(payload, requestPath);
+  const instance_name = readFirstString(
+    payload?.instance,
+    payload?.instanceName,
+    payload?.instance_name,
+    payload?.instancia,
+    payload?.data?.instance,
+    payload?.data?.instanceName,
+    payload?.event?.instance,
+  );
+  const from_me = extractFromMe(payload);
+  const remote_jid = extractRemoteJidFromPayload(payload);
+  const participant_jid = extractParticipantJidFromPayload(payload);
+  const chat_jid = extractChatJidFromPayload(payload, remote_jid);
+  const sender_jid = extractSenderJidFromPayload(payload, remote_jid, participant_jid);
+  const contact_jid = resolveContactJid(remote_jid, chat_jid, participant_jid, sender_jid);
+  const contactPhoneNormalized = normalizePhone(contact_jid ?? remote_jid) || null;
+  const direction = parseDirection(payload?.direcao) ?? (from_me ? 'saida' : 'entrada');
+  const message_type = inferTipoFromPayload(payload) ?? 'desconhecido';
+  const caption = extractCaptionFromPayload(payload);
+  const message_text = extractTextFromPayload(payload) ?? caption;
+  const arquivo_base64 = extractMediaBase64FromPayload(payload);
+  const media_mime_type =
+    extractMediaMimeTypeFromPayload(payload, arquivo_base64) ??
+    (arquivo_base64 ? defaultMimeTypeByTipo(message_type) ?? 'application/octet-stream' : null);
+  const processedAt = new Date();
+
+  return {
+    instance_name,
+    message_id: extractMessageId(payload, source_event_type),
+    remote_jid,
+    chat_jid,
+    contact_jid,
+    contact_phone_normalized: contactPhoneNormalized,
+    sender_jid,
+    participant_jid,
+    from_me,
+    direction,
+    message_type,
+    message_text,
+    caption,
+    media_url: extractMediaUrlFromPayload(payload),
+    media_mime_type,
+    media_file_name: extractMediaFileNameFromPayload(payload),
+    quoted_message_id: extractQuotedMessageId(payload),
+    quoted_message_text: extractQuotedMessageText(payload),
+    quoted_remote_jid: extractQuotedRemoteJid(payload, chat_jid ?? remote_jid),
+    status: extractMessageStatus(payload, source_event_type, from_me),
+    message_timestamp: parseMessageTimestamp(
+      readFirstValue(
+        payload?.data?.messageTimestamp,
+        payload?.messageTimestamp,
+        payload?.data?.timestamp,
+        payload?.timestamp,
+        payload?.data?.message?.messageTimestamp,
+        payload?.message?.messageTimestamp,
+        payload?.data?.messageTimestampLow,
+      ),
+    ),
+    push_name: extractContactNameFromPayload(payload),
+    payload_raw_json: safeJsonStringify(payload),
+    source_event_type,
+    received_at: receivedAt,
+    processed_at: processedAt,
+    arquivo_base64,
+  };
+}
+
+function hasPersistableMessageContent(message: Pick<NormalizedEvolutionMessage, 'message_text' | 'caption' | 'media_url' | 'media_mime_type' | 'arquivo_base64'>): boolean {
+  return Boolean(
+    message.message_text ||
+    message.caption ||
+    message.media_url ||
+    message.media_mime_type ||
+    message.arquivo_base64,
+  );
+}
+
+function shouldCreateAttendanceMessage(
+  message: NormalizedEvolutionMessage,
+  existingRecord: { legacy_mensagem_id: number | null } | null,
+): boolean {
+  if (existingRecord?.legacy_mensagem_id) return false;
+  if (message.status === 'deleted') return false;
+  if (message.status === 'edited') return false;
+  if (message.source_event_type.toLowerCase().includes('update')) return false;
+  return hasPersistableMessageContent(message);
+}
+
+function buildMensagemIngestaoCreateData(message: NormalizedEvolutionMessage, cod_loja: number | null) {
+  return {
+    cod_loja: cod_loja ?? undefined,
+    instance_name: message.instance_name!,
+    message_id: message.message_id!,
+    remote_jid: message.remote_jid ?? undefined,
+    chat_jid: message.chat_jid ?? undefined,
+    contact_jid: message.contact_jid ?? undefined,
+    contact_phone_normalized: message.contact_phone_normalized ?? undefined,
+    sender_jid: message.sender_jid ?? undefined,
+    participant_jid: message.participant_jid ?? undefined,
+    from_me: message.from_me,
+    direction: message.direction,
+    message_type: message.message_type,
+    message_text: message.message_text ?? undefined,
+    caption: message.caption ?? undefined,
+    media_url: message.media_url ?? undefined,
+    media_mime_type: message.media_mime_type ?? undefined,
+    media_file_name: message.media_file_name ?? undefined,
+    quoted_message_id: message.quoted_message_id ?? undefined,
+    quoted_message_text: message.quoted_message_text ?? undefined,
+    quoted_remote_jid: message.quoted_remote_jid ?? undefined,
+    status: message.status,
+    message_timestamp: message.message_timestamp ?? undefined,
+    push_name: message.push_name ?? undefined,
+    payload_raw_json: message.payload_raw_json,
+    source_event_type: message.source_event_type,
+    received_at: message.received_at,
+    processed_at: message.processed_at,
+    deleted_at: message.status === 'deleted' ? message.processed_at : undefined,
+    edited_at: message.status === 'edited' ? message.processed_at : undefined,
+  };
+}
+
+function buildMensagemIngestaoUpdateData(existing: any, message: NormalizedEvolutionMessage, cod_loja: number | null) {
+  return {
+    cod_loja: existing.cod_loja ?? cod_loja ?? undefined,
+    remote_jid: existing.remote_jid ?? message.remote_jid ?? undefined,
+    chat_jid: existing.chat_jid ?? message.chat_jid ?? undefined,
+    contact_jid: message.contact_jid ?? existing.contact_jid ?? undefined,
+    contact_phone_normalized: message.contact_phone_normalized ?? existing.contact_phone_normalized ?? undefined,
+    sender_jid: message.sender_jid ?? existing.sender_jid ?? undefined,
+    participant_jid: message.participant_jid ?? existing.participant_jid ?? undefined,
+    from_me: message.from_me,
+    direction: message.direction,
+    message_type:
+      message.message_type !== 'desconhecido' || !existing.message_type
+        ? message.message_type
+        : existing.message_type,
+    message_text: message.message_text ?? existing.message_text ?? undefined,
+    caption: message.caption ?? existing.caption ?? undefined,
+    media_url: message.media_url ?? existing.media_url ?? undefined,
+    media_mime_type: message.media_mime_type ?? existing.media_mime_type ?? undefined,
+    media_file_name: message.media_file_name ?? existing.media_file_name ?? undefined,
+    quoted_message_id: message.quoted_message_id ?? existing.quoted_message_id ?? undefined,
+    quoted_message_text: message.quoted_message_text ?? existing.quoted_message_text ?? undefined,
+    quoted_remote_jid: message.quoted_remote_jid ?? existing.quoted_remote_jid ?? undefined,
+    status: message.status ?? existing.status,
+    message_timestamp: message.message_timestamp ?? existing.message_timestamp ?? undefined,
+    push_name: message.push_name ?? existing.push_name ?? undefined,
+    payload_raw_json: message.payload_raw_json,
+    source_event_type: message.source_event_type,
+    processed_at: message.processed_at,
+    deleted_at:
+      message.status === 'deleted'
+        ? existing.deleted_at ?? message.processed_at
+        : existing.deleted_at ?? undefined,
+    edited_at:
+      message.status === 'edited'
+        ? message.processed_at
+        : existing.edited_at ?? undefined,
+  };
+}
+
+async function upsertMensagemIngestao(
+  client: PrismaDbClient,
+  message: NormalizedEvolutionMessage,
+  cod_loja: number | null,
+) {
+  const existing = await client.mensagem_ingestao.findUnique({
+    where: {
+      instance_name_message_id: {
+        instance_name: message.instance_name!,
+        message_id: message.message_id!,
+      },
+    },
+  });
+
+  if (!existing) {
+    const created = await client.mensagem_ingestao.create({
+      data: buildMensagemIngestaoCreateData(message, cod_loja),
+    });
+    return { record: created, created: true };
+  }
+
+  const updated = await client.mensagem_ingestao.update({
+    where: { id: existing.id },
+    data: buildMensagemIngestaoUpdateData(existing, message, cod_loja),
+  });
+
+  return { record: updated, created: false };
+}
+
+async function registrarEventoIngestao(
+  client: PrismaDbClient,
+  message: Pick<NormalizedEvolutionMessage, 'instance_name' | 'message_id' | 'source_event_type' | 'payload_raw_json' | 'received_at' | 'processed_at'>,
+  mensagemIngestaoId?: number,
+) {
+  return client.mensagem_ingestao_evento.create({
+    data: {
+      mensagem_ingestao_id: mensagemIngestaoId,
+      instance_name: message.instance_name ?? undefined,
+      message_id: message.message_id ?? undefined,
+      source_event_type: message.source_event_type,
+      payload_raw_json: message.payload_raw_json,
+      received_at: message.received_at,
+      processed_at: message.processed_at,
+    },
+  });
+}
+
+async function atualizarVinculosMensagemIngestao(
+  client: PrismaDbClient,
+  mensagemIngestaoId: number,
+  data: {
+    attendance_id?: number | null;
+    contato_id?: number | null;
+    legacy_mensagem_id?: number | null;
+    cod_loja?: number | null;
+  },
+) {
+  return client.mensagem_ingestao.update({
+    where: { id: mensagemIngestaoId },
+    data: {
+      attendance_id: data.attendance_id ?? undefined,
+      contato_id: data.contato_id ?? undefined,
+      legacy_mensagem_id: data.legacy_mensagem_id ?? undefined,
+      cod_loja: data.cod_loja ?? undefined,
+      processed_at: new Date(),
+    },
+  });
+}
+
 function maskKey(value: string | null): string {
   if (!value) return '';
   if (value.length <= 8) return '***';
@@ -458,6 +1291,7 @@ function serializeAtendimento(
           contato: atendimento.contato.contato,
           telefone: atendimento.contato.telefone,
           tipo: atendimento.contato.tipo,
+          profile_picture_url: atendimento.contato.profile_picture_url ?? null,
         }
       : null,
   };
@@ -465,11 +1299,15 @@ function serializeAtendimento(
 
 export async function webhookMensagem(req: Request, res: Response) {
   try {
+    const receivedAt = new Date();
     console.info('[mensagens/webhook] requisicao recebida:', {
       originalUrl: req.originalUrl,
       path: req.path,
     });
     console.info('[mensagens/webhook] payload recebido:', payloadPreview(req.body));
+
+    const mensagemNormalizada = extractNormalizedMessage(req.body, req.originalUrl || req.path, receivedAt);
+    const eventoIngestao = await registrarEventoIngestao(prisma, mensagemNormalizada);
 
     const cod_loja_payload = asPositiveInt(req.body?.cod_loja);
     const apikey = readFirstString(
@@ -481,15 +1319,7 @@ export async function webhookMensagem(req: Request, res: Response) {
       req.headers['apikey'],
       req.headers['x-api-key'],
     );
-    const evolution_instancia = readFirstString(
-      req.body?.instance,
-      req.body?.instanceName,
-      req.body?.instance_name,
-      req.body?.instancia,
-      req.body?.data?.instance,
-      req.body?.data?.instanceName,
-      req.body?.event?.instance,
-    );
+    const evolution_instancia = mensagemNormalizada.instance_name;
     const evolution_url = normalizeUrl(
       readFirstString(
         req.body?.server_url,
@@ -500,27 +1330,26 @@ export async function webhookMensagem(req: Request, res: Response) {
         req.headers['origin'],
       ),
     );
-    const fromMe = extractFromMe(req.body);
-    const telefoneRaw = extractPhoneFromPayload(req.body, fromMe);
-    const telefone = normalizePhone(telefoneRaw);
-    const direcao = parseDirection(req.body?.direcao) ?? (fromMe ? 'saida' : 'entrada');
-    const tipo = inferTipoFromPayload(req.body) ?? 'texto';
-    const texto = extractTextFromPayload(req.body);
-    const arquivo_base64 = extractMediaBase64FromPayload(req.body);
-    const arquivo_mimetype =
-      extractMediaMimeTypeFromPayload(req.body, arquivo_base64) ??
-      (arquivo_base64 ? defaultMimeTypeByTipo(tipo) ?? 'application/octet-stream' : null);
-    const contatoNome = extractContactNameFromPayload(req.body);
     const contatoTipo = asNullableString(req.body?.contato_tipo ?? req.body?.tipo_contato);
     const cliente_codigo = asNullablePositiveInt(req.body?.cliente_codigo);
     const usuario_id = asNullablePositiveInt(req.body?.usuario_id);
     const origem = asNullableString(req.body?.origem) ?? 'whatsapp';
 
-    let lojaResolvida = null as { codigo: number } | null;
+    let lojaResolvida = null as {
+      codigo: number;
+      evolution_url: string | null;
+      evolution_instancia: string | null;
+      evolution_apikey: string | null;
+    } | null;
     if (apikey) {
       lojaResolvida = await prisma.loja.findFirst({
         where: { evolution_apikey: apikey },
-        select: { codigo: true },
+        select: {
+          codigo: true,
+          evolution_url: true,
+          evolution_instancia: true,
+          evolution_apikey: true,
+        },
       });
     }
     if (!lojaResolvida && evolution_instancia) {
@@ -528,11 +1357,38 @@ export async function webhookMensagem(req: Request, res: Response) {
       if (evolution_url) whereByInstancia.evolution_url = evolution_url;
       lojaResolvida = await prisma.loja.findFirst({
         where: whereByInstancia,
-        select: { codigo: true },
+        select: {
+          codigo: true,
+          evolution_url: true,
+          evolution_instancia: true,
+          evolution_apikey: true,
+        },
       });
     }
 
     const cod_loja = lojaResolvida?.codigo ?? cod_loja_payload;
+    const lojaConfig = lojaResolvida ?? (
+      cod_loja
+        ? await prisma.loja.findFirst({
+            where: { codigo: cod_loja },
+            select: {
+              codigo: true,
+              evolution_url: true,
+              evolution_instancia: true,
+              evolution_apikey: true,
+            },
+          })
+        : null
+    );
+
+    const contatoNomeResolvido = await resolveContactName({
+      webhookPayload: req.body,
+      baseUrl: lojaConfig?.evolution_url ?? evolution_url,
+      instance: lojaConfig?.evolution_instancia ?? evolution_instancia,
+      apiKey: lojaConfig?.evolution_apikey ?? apikey,
+      timeoutMs: 10000,
+      logger: console,
+    });
 
     console.info('[mensagens/webhook] resolucao da loja:', {
       cod_loja_payload,
@@ -544,47 +1400,88 @@ export async function webhookMensagem(req: Request, res: Response) {
     });
 
     console.info('[mensagens/webhook] campos normalizados:', {
+      instance_name: mensagemNormalizada.instance_name,
+      message_id: mensagemNormalizada.message_id,
       cod_loja,
-      fromMe,
-      telefoneRaw,
-      telefone,
-      direcao,
-      tipo,
-      contatoNome,
+      source_event_type: mensagemNormalizada.source_event_type,
+      status: mensagemNormalizada.status,
+      fromMe: mensagemNormalizada.from_me,
+      remote_jid: mensagemNormalizada.remote_jid,
+      chat_jid: mensagemNormalizada.chat_jid,
+      contact_jid: mensagemNormalizada.contact_jid,
+      telefone: mensagemNormalizada.contact_phone_normalized,
+      direcao: mensagemNormalizada.direction,
+      tipo: mensagemNormalizada.message_type,
+      contatoNome: contatoNomeResolvido.contactName,
+      contatoNomeSource: contatoNomeResolvido.sourceUsed,
       contatoTipo,
       cliente_codigo,
       usuario_id,
       origem,
-      hasTexto: Boolean(texto),
-      hasArquivoBase64: Boolean(arquivo_base64),
-      arquivoMimetype: arquivo_mimetype,
-      base64Length: arquivo_base64 ? arquivo_base64.length : 0,
+      quoted_message_id: mensagemNormalizada.quoted_message_id,
+      hasTexto: Boolean(mensagemNormalizada.message_text),
+      hasArquivoBase64: Boolean(mensagemNormalizada.arquivo_base64),
+      arquivoMimetype: mensagemNormalizada.media_mime_type,
+      base64Length: mensagemNormalizada.arquivo_base64 ? mensagemNormalizada.arquivo_base64.length : 0,
     });
 
-    if (!cod_loja) {
-      console.warn('[mensagens/webhook] rejeitado: nao foi possivel identificar cod_loja por apikey/instancia/url');
+    if (!mensagemNormalizada.instance_name || !mensagemNormalizada.message_id) {
+      console.warn('[mensagens/webhook] rejeitado: instance_name/message_id ausentes para idempotencia');
       return res.status(400).json({
-        error: 'Nao foi possivel identificar cod_loja. Configure evolution_apikey/evolution_instancia/evolution_url na loja.',
+        error: 'Campos instance_name e message_id sao obrigatorios para persistencia idempotente.',
+        ingest_event_id: eventoIngestao.id,
       });
     }
+
+    const upsertIngestao = await upsertMensagemIngestao(prisma, mensagemNormalizada, cod_loja);
+    await prisma.mensagem_ingestao_evento.update({
+      where: { id: eventoIngestao.id },
+      data: {
+        mensagem_ingestao_id: upsertIngestao.record.id,
+        processed_at: new Date(),
+      },
+    });
+
+    if (!shouldCreateAttendanceMessage(mensagemNormalizada, upsertIngestao.record)) {
+      console.info('[mensagens/webhook] evento persistido sem vinculacao de atendimento', {
+        ingest_message_id: upsertIngestao.record.id,
+        source_event_type: mensagemNormalizada.source_event_type,
+        status: mensagemNormalizada.status,
+      });
+      return res.status(upsertIngestao.created ? 201 : 200).json({
+        message: 'Evento persistido com sucesso.',
+        ingest_message_id: upsertIngestao.record.id,
+        attendance_linked: false,
+        duplicate: !upsertIngestao.created,
+      });
+    }
+
+    if (!cod_loja) {
+      console.warn('[mensagens/webhook] mensagem persistida sem atendimento: cod_loja nao identificado');
+      return res.status(202).json({
+        message: 'Mensagem persistida, mas cod_loja nao foi identificado para vinculacao ao atendimento.',
+        ingest_message_id: upsertIngestao.record.id,
+        attendance_linked: false,
+      });
+    }
+
+    const telefone = mensagemNormalizada.contact_phone_normalized;
     if (!telefone) {
-      console.warn('[mensagens/webhook] rejeitado: telefone/numero ausente (incluindo key.remoteJid)');
-      return res.status(400).json({ error: 'Campo telefone/numero e obrigatorio.' });
-    }
-    if (!direcao) {
-      console.warn('[mensagens/webhook] rejeitado: direcao invalida');
-      return res.status(400).json({ error: "Campo direcao deve ser 'entrada' ou 'saida'." });
-    }
-    if (!texto && !arquivo_base64) {
-      console.info('[mensagens/webhook] ignorado: sem texto e sem arquivo_base64');
-      return res.status(200).json({
-        message: 'Evento ignorado: sem texto e sem arquivo_base64.',
-        ignored: true,
+      console.warn('[mensagens/webhook] mensagem persistida sem atendimento: telefone nao identificado');
+      return res.status(202).json({
+        message: 'Mensagem persistida, mas nao foi possivel identificar o telefone do contato.',
+        ingest_message_id: upsertIngestao.record.id,
+        attendance_linked: false,
       });
     }
 
     const resultado = await prisma.$transaction(async (tx) => {
-      console.info('[mensagens/webhook] iniciando transacao', { cod_loja, telefone });
+      console.info('[mensagens/webhook] iniciando transacao', {
+        cod_loja,
+        telefone,
+        ingest_message_id: upsertIngestao.record.id,
+      });
+      let contatoNovo = false;
       let contato = await tx.contato.findUnique({
         where: { cod_loja_telefone: { cod_loja, telefone } },
       });
@@ -595,11 +1492,12 @@ export async function webhookMensagem(req: Request, res: Response) {
           data: {
             cod_loja,
             cliente_codigo,
-            contato: contatoNome ?? 'Contato WhatsApp',
+            contato: contatoNomeResolvido.contactName ?? 'Contato WhatsApp',
             telefone,
             tipo: contatoTipo ?? 'whatsapp',
           },
         });
+        contatoNovo = true;
       } else {
         console.info('[mensagens/webhook] contato existente encontrado', {
           contato_id: contato.id,
@@ -608,9 +1506,17 @@ export async function webhookMensagem(req: Request, res: Response) {
         const updateData: any = {};
         const nomeContatoAtual = asNullableString(contato.contato);
         const nomeContatoAtualEhPlaceholder =
-          !nomeContatoAtual || nomeContatoAtual.toLowerCase() === 'contato whatsapp';
-        if (!fromMe && contatoNome && contatoNome !== contato.contato && nomeContatoAtualEhPlaceholder) {
-          updateData.contato = contatoNome;
+          !nomeContatoAtual ||
+          nomeContatoAtual.toLowerCase() === 'contato whatsapp' ||
+          nomeContatoAtual === contato.telefone;
+        if (
+          !mensagemNormalizada.from_me &&
+          contatoNomeResolvido.contactName &&
+          contatoNomeResolvido.sourceUsed !== 'fallback.phone' &&
+          contatoNomeResolvido.contactName !== contato.contato &&
+          nomeContatoAtualEhPlaceholder
+        ) {
+          updateData.contato = contatoNomeResolvido.contactName;
         }
         if (contatoTipo && contatoTipo !== contato.tipo) updateData.tipo = contatoTipo;
         if (cliente_codigo && cliente_codigo !== contato.cliente_codigo) updateData.cliente_codigo = cliente_codigo;
@@ -657,42 +1563,118 @@ export async function webhookMensagem(req: Request, res: Response) {
         });
       }
 
-      const mensagem = await tx.mensagem.create({
-        data: {
-          cod_loja,
-          atendimento_id: atendimento.id,
-          contato_id: contato.id,
-          usuario_id,
-          from_me: fromMe,
-          direcao,
-          tipo,
-          texto,
-          arquivo_base64: arquivo_base64 ?? undefined,
-          arquivo_mimetype: arquivo_mimetype ?? undefined,
-        },
+      let mensagemIdLegado = upsertIngestao.record.legacy_mensagem_id;
+      if (!mensagemIdLegado) {
+        const mensagem = await tx.mensagem.create({
+          data: {
+            cod_loja,
+            atendimento_id: atendimento.id,
+            contato_id: contato.id,
+            usuario_id,
+            from_me: mensagemNormalizada.from_me,
+            direcao: mensagemNormalizada.direction,
+            tipo: mensagemNormalizada.message_type === 'desconhecido' ? 'texto' : mensagemNormalizada.message_type,
+            texto: mensagemNormalizada.message_text,
+            arquivo_base64: mensagemNormalizada.arquivo_base64 ?? undefined,
+            arquivo_mimetype: mensagemNormalizada.media_mime_type ?? undefined,
+          },
+        });
+        mensagemIdLegado = mensagem.id;
+      }
+
+      await atualizarVinculosMensagemIngestao(tx, upsertIngestao.record.id, {
+        attendance_id: atendimento.id,
+        contato_id: contato.id,
+        legacy_mensagem_id: mensagemIdLegado,
+        cod_loja,
       });
 
       console.info('[mensagens/webhook] mensagem registrada', {
-        mensagem_id: mensagem.id,
+        ingest_message_id: upsertIngestao.record.id,
+        mensagem_id: mensagemIdLegado,
         atendimento_id: atendimento.id,
         contato_id: contato.id,
       });
 
       return {
         atendimento_id: atendimento.id,
-        mensagem_id: mensagem.id,
+        mensagem_id: mensagemIdLegado,
+        ingest_message_id: upsertIngestao.record.id,
         contato_id: contato.id,
+        should_fetch_profile_picture: contatoNovo || shouldRefreshProfilePicture(contato),
         novo_atendimento,
+        duplicate: !upsertIngestao.created,
       };
     });
 
-    return res.status(201).json({
+    if (resultado.should_fetch_profile_picture) {
+      await tryRefreshContactProfilePhoto({
+        contatoId: resultado.contato_id,
+        codLoja: cod_loja,
+        instanceName: mensagemNormalizada.instance_name,
+        remoteJid: mensagemNormalizada.contact_jid ?? mensagemNormalizada.remote_jid,
+        phone: telefone,
+      });
+    }
+
+    const { should_fetch_profile_picture, ...resultadoResposta } = resultado;
+
+    return res.status(upsertIngestao.created ? 201 : 200).json({
       message: 'Mensagem processada com sucesso.',
-      ...resultado,
+      ...resultadoResposta,
     });
   } catch (error) {
     console.error('[mensagens/webhook] erro:', error);
     return res.status(500).json({ error: 'Erro ao processar mensagem.' });
+  }
+}
+
+export async function consultarMensagemPorMessageId(req: Request, res: Response) {
+  try {
+    const message_id = asNullableString(req.params?.message_id);
+    const instance_name = asNullableString(req.query?.instance_name);
+
+    if (!message_id) {
+      return res.status(400).json({ error: 'Campo message_id e obrigatorio.' });
+    }
+
+    if (instance_name) {
+      const mensagem = await prisma.mensagem_ingestao.findUnique({
+        where: {
+          instance_name_message_id: {
+            instance_name,
+            message_id,
+          },
+        },
+      });
+
+      if (!mensagem) {
+        return res.status(404).json({ error: 'Mensagem nao encontrada.' });
+      }
+
+      return res.json(mensagem);
+    }
+
+    const mensagens = await prisma.mensagem_ingestao.findMany({
+      where: { message_id },
+      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+      take: 2,
+    });
+
+    if (mensagens.length === 0) {
+      return res.status(404).json({ error: 'Mensagem nao encontrada.' });
+    }
+
+    if (mensagens.length > 1) {
+      return res.status(409).json({
+        error: 'Mais de uma mensagem encontrada para este message_id. Informe instance_name.',
+      });
+    }
+
+    return res.json(mensagens[0]);
+  } catch (error) {
+    console.error('Erro em consultarMensagemPorMessageId:', error);
+    return res.status(500).json({ error: 'Erro ao consultar mensagem por message_id.' });
   }
 }
 
@@ -847,6 +1829,7 @@ export async function listarMensagensAtendimento(req: Request, res: Response) {
         ...serializeAtendimento(atendimento, statusFluxoMap),
         contato: atendimento.contato?.contato ?? null,
         telefone: atendimento.contato?.telefone ?? null,
+        profile_picture_url: atendimento.contato?.profile_picture_url ?? null,
       },
       nextOffset: offset + limit < total ? offset + limit : null,
     });
@@ -1051,6 +2034,7 @@ export async function ajustarNomeContato(req: Request, res: Response) {
         cod_loja: contato.cod_loja,
         contato: contato.contato,
         telefone: contato.telefone,
+        profile_picture_url: contato.profile_picture_url,
       });
     }
 
@@ -1065,10 +2049,64 @@ export async function ajustarNomeContato(req: Request, res: Response) {
       cod_loja: atualizado.cod_loja,
       contato: atualizado.contato,
       telefone: atualizado.telefone,
+      profile_picture_url: atualizado.profile_picture_url,
     });
   } catch (error) {
     console.error('Erro em ajustarNomeContato:', error);
     return res.status(500).json({ error: 'Erro ao ajustar nome do contato.' });
+  }
+}
+
+export async function atualizarFotoContato(req: Request, res: Response) {
+  try {
+    const cod_loja = asPositiveInt(req.body?.cod_loja);
+    const contato_id = asPositiveInt(req.params?.contato_id);
+    const profile_picture_url = normalizeProfilePictureUrl(
+      readFirstString(req.body?.profile_picture_url, req.body?.profilePictureUrl),
+    );
+
+    if (!cod_loja || !contato_id) {
+      return res.status(400).json({ error: 'Campos cod_loja e contato_id sao obrigatorios.' });
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(req.body ?? {}, 'profile_picture_url') ||
+      Object.prototype.hasOwnProperty.call(req.body ?? {}, 'profilePictureUrl')
+    ) {
+      const rawProfilePictureUrl = readFirstString(req.body?.profile_picture_url, req.body?.profilePictureUrl);
+      if (rawProfilePictureUrl && !profile_picture_url) {
+        return res.status(400).json({ error: 'Campo profile_picture_url deve ser uma URL http(s) valida.' });
+      }
+    }
+
+    const contato = await prisma.contato.findUnique({
+      where: { id_cod_loja: { id: contato_id, cod_loja } },
+    });
+
+    if (!contato) {
+      return res.status(404).json({ error: 'Contato nao encontrado.' });
+    }
+
+    const atualizado = await prisma.contato.update({
+      where: { id: contato.id },
+      data: {
+        profile_picture_url: profile_picture_url ?? null,
+        profile_picture_checked_at: new Date(),
+      },
+    });
+
+    return res.json({
+      message: 'Foto do contato atualizada com sucesso.',
+      id: atualizado.id,
+      cod_loja: atualizado.cod_loja,
+      contato: atualizado.contato,
+      telefone: atualizado.telefone,
+      profile_picture_url: atualizado.profile_picture_url,
+      profile_picture_checked_at: atualizado.profile_picture_checked_at,
+    });
+  } catch (error) {
+    console.error('Erro em atualizarFotoContato:', error);
+    return res.status(500).json({ error: 'Erro ao atualizar foto do contato.' });
   }
 }
 
@@ -1128,6 +2166,7 @@ export async function vincularContatoCliente(req: Request, res: Response) {
         contato: resultado.contatoAtualizado.contato,
         telefone: resultado.contatoAtualizado.telefone,
         cliente_codigo: resultado.contatoAtualizado.cliente_codigo,
+        profile_picture_url: resultado.contatoAtualizado.profile_picture_url,
       },
       cliente,
       atendimentos_atualizados: resultado.atendimentosAtualizados,

@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS `contatos` (
   `contato` VARCHAR(100) NOT NULL,
   `telefone` VARCHAR(50) NOT NULL,
   `tipo` VARCHAR(20) NULL,
+  `profile_picture_url` LONGTEXT NULL,
+  `profile_picture_checked_at` DATETIME(3) NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
