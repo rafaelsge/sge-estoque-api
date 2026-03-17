@@ -1388,6 +1388,8 @@ export async function webhookMensagem(req: Request, res: Response) {
       apiKey: lojaConfig?.evolution_apikey ?? apikey,
       timeoutMs: 10000,
       logger: console,
+      remoteJidOverride: mensagemNormalizada.contact_jid ?? mensagemNormalizada.remote_jid,
+      fromMeOverride: mensagemNormalizada.from_me,
     });
 
     console.info('[mensagens/webhook] resolucao da loja:', {

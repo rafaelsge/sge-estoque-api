@@ -64,6 +64,18 @@ function extractPushName(webhookPayload) {
   );
 }
 
+function extractFromMe(webhookPayload) {
+  return Boolean(
+    webhookPayload?.data?.key?.fromMe ??
+    webhookPayload?.key?.fromMe ??
+    webhookPayload?.data?.fromMe ??
+    webhookPayload?.fromMe ??
+    webhookPayload?.data?.messages?.[0]?.key?.fromMe ??
+    webhookPayload?.messages?.[0]?.key?.fromMe ??
+    false
+  );
+}
+
 function extractPhoneFromJid(remoteJid) {
   const jid = sanitizeString(remoteJid);
   if (!jid) return null;
@@ -218,12 +230,15 @@ async function resolveContactName({
   apiKey,
   timeoutMs = 10000,
   logger = null,
+  remoteJidOverride = null,
+  fromMeOverride = null,
 } = {}) {
-  const remoteJid = extractRemoteJid(webhookPayload);
+  const remoteJid = sanitizeString(remoteJidOverride) || extractRemoteJid(webhookPayload);
   const phone = extractPhoneFromJid(remoteJid);
+  const fromMe = typeof fromMeOverride === 'boolean' ? fromMeOverride : extractFromMe(webhookPayload);
   const webhookPushName = extractPushName(webhookPayload);
 
-  if (webhookPushName) {
+  if (webhookPushName && !fromMe) {
     log(logger, 'info', '[resolveContactName] using webhook pushName', { remoteJid });
     return {
       remoteJid,
@@ -231,6 +246,12 @@ async function resolveContactName({
       contactName: webhookPushName,
       sourceUsed: 'webhook.pushName',
     };
+  }
+
+  if (webhookPushName && fromMe) {
+    log(logger, 'info', '[resolveContactName] webhook pushName ignored for fromMe message', {
+      remoteJid,
+    });
   }
 
   const contact = await findContactByRemoteJid({
@@ -270,6 +291,7 @@ async function resolveContactName({
 module.exports = {
   extractRemoteJid,
   extractPushName,
+  extractFromMe,
   extractPhoneFromJid,
   findContactByRemoteJid,
   pickBestContactName,
