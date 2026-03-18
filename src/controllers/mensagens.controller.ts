@@ -1297,6 +1297,40 @@ function serializeAtendimento(
   };
 }
 
+async function attachCanonicalMessageIds<T extends { id: number }>(
+  mensagens: T[],
+): Promise<Array<T & { message_id: string | null }>> {
+  if (mensagens.length === 0) return [];
+
+  const legacyMensagemIds = Array.from(new Set(mensagens.map((mensagem) => mensagem.id)));
+
+  const mensagensCanonicas = await prisma.mensagem_ingestao.findMany({
+    where: {
+      legacy_mensagem_id: { in: legacyMensagemIds },
+    },
+    select: {
+      legacy_mensagem_id: true,
+      message_id: true,
+    },
+    orderBy: [
+      { updated_at: 'desc' },
+      { id: 'desc' },
+    ],
+  });
+
+  const messageIdByLegacyId = new Map<number, string>();
+  for (const mensagemCanonica of mensagensCanonicas) {
+    if (!mensagemCanonica.legacy_mensagem_id) continue;
+    if (messageIdByLegacyId.has(mensagemCanonica.legacy_mensagem_id)) continue;
+    messageIdByLegacyId.set(mensagemCanonica.legacy_mensagem_id, mensagemCanonica.message_id);
+  }
+
+  return mensagens.map((mensagem) => ({
+    ...mensagem,
+    message_id: messageIdByLegacyId.get(mensagem.id) ?? null,
+  }));
+}
+
 export async function webhookMensagem(req: Request, res: Response) {
   try {
     const receivedAt = new Date();
@@ -1821,12 +1855,13 @@ export async function listarMensagensAtendimento(req: Request, res: Response) {
       skip: offset,
       take: limit,
     });
+    const mensagensComMessageId = await attachCanonicalMessageIds(mensagens);
 
     const statusFluxoMap = await carregarStatusFluxoMap(cod_loja, [resolveStatusFluxo(atendimento)]);
 
     return res.json({
       total,
-      data: mensagens,
+      data: mensagensComMessageId,
       atendimento: {
         ...serializeAtendimento(atendimento, statusFluxoMap),
         contato: atendimento.contato?.contato ?? null,
@@ -1902,10 +1937,11 @@ export async function listarMensagensContato(req: Request, res: Response) {
       skip: offset,
       take: limit,
     });
+    const mensagensComMessageId = await attachCanonicalMessageIds(mensagens);
 
     return res.json({
       total,
-      data: mensagens,
+      data: mensagensComMessageId,
       contato,
       nextOffset: offset + limit < total ? offset + limit : null,
     });
