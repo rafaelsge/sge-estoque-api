@@ -1105,8 +1105,8 @@ function shouldCreateAttendanceMessage(
   if (existingRecord?.legacy_mensagem_id) return false;
   if (message.status === 'deleted') return false;
   if (message.status === 'edited') return false;
-  if (message.source_event_type.toLowerCase().includes('update')) return false;
-  return hasPersistableMessageContent(message);
+  if (hasPersistableMessageContent(message)) return true;
+  return Boolean(message.message_id && (message.contact_jid || message.remote_jid || message.chat_jid));
 }
 
 function buildMensagemIngestaoCreateData(message: NormalizedEvolutionMessage, cod_loja: number | null) {
@@ -1430,23 +1430,6 @@ export async function webhookMensagem(req: Request, res: Response) {
 
     const mensagemNormalizada = extractNormalizedMessage(req.body, req.originalUrl || req.path, receivedAt);
     const eventoIngestao = await registrarEventoIngestao(prisma, mensagemNormalizada);
-    const sourceEventTypeNormalized = mensagemNormalizada.source_event_type.toLowerCase();
-
-    if (
-      !sourceEventTypeNormalized.startsWith('messages.') &&
-      !sourceEventTypeNormalized.startsWith('messages-') &&
-      !sourceEventTypeNormalized.startsWith('messages_')
-    ) {
-      console.info('[mensagens/webhook] evento nao relacionado a mensagens, persistido apenas no log bruto', {
-        source_event_type: mensagemNormalizada.source_event_type,
-        ingest_event_id: eventoIngestao.id,
-      });
-      return res.status(202).json({
-        message: 'Evento recebido e persistido no log bruto.',
-        ingest_event_id: eventoIngestao.id,
-        attendance_linked: false,
-      });
-    }
 
     const cod_loja_payload = asPositiveInt(req.body?.cod_loja);
     const apikey = readFirstString(
@@ -1584,6 +1567,8 @@ export async function webhookMensagem(req: Request, res: Response) {
       },
     });
 
+    const codLojaEfetivo = cod_loja ?? upsertIngestao.record.cod_loja ?? null;
+
     if (!shouldCreateAttendanceMessage(mensagemNormalizada, upsertIngestao.record)) {
       console.info('[mensagens/webhook] evento persistido sem vinculacao de atendimento', {
         ingest_message_id: upsertIngestao.record.id,
@@ -1598,7 +1583,7 @@ export async function webhookMensagem(req: Request, res: Response) {
       });
     }
 
-    if (!cod_loja) {
+    if (!codLojaEfetivo) {
       console.warn('[mensagens/webhook] mensagem persistida sem atendimento: cod_loja nao identificado');
       return res.status(202).json({
         message: 'Mensagem persistida, mas cod_loja nao foi identificado para vinculacao ao atendimento.',
@@ -1607,7 +1592,11 @@ export async function webhookMensagem(req: Request, res: Response) {
       });
     }
 
-    const telefone = mensagemNormalizada.contact_phone_normalized;
+    const telefone = (
+      mensagemNormalizada.contact_phone_normalized ??
+      upsertIngestao.record.contact_phone_normalized ??
+      normalizePhone(upsertIngestao.record.contact_jid ?? upsertIngestao.record.remote_jid)
+    ) || null;
     if (!telefone) {
       console.warn('[mensagens/webhook] mensagem persistida sem atendimento: telefone nao identificado');
       return res.status(202).json({
@@ -1619,20 +1608,20 @@ export async function webhookMensagem(req: Request, res: Response) {
 
     const resultado = await prisma.$transaction(async (tx) => {
       console.info('[mensagens/webhook] iniciando transacao', {
-        cod_loja,
+        cod_loja: codLojaEfetivo,
         telefone,
         ingest_message_id: upsertIngestao.record.id,
       });
       let contatoNovo = false;
       let contato = await tx.contato.findUnique({
-        where: { cod_loja_telefone: { cod_loja, telefone } },
+        where: { cod_loja_telefone: { cod_loja: codLojaEfetivo, telefone } },
       });
 
       if (!contato) {
-        console.info('[mensagens/webhook] contato nao encontrado, criando', { cod_loja, telefone });
+        console.info('[mensagens/webhook] contato nao encontrado, criando', { cod_loja: codLojaEfetivo, telefone });
         contato = await tx.contato.create({
           data: {
-            cod_loja,
+            cod_loja: codLojaEfetivo,
             cliente_codigo,
             contato: contatoNomeResolvido.contactName ?? 'Contato WhatsApp',
             telefone,
@@ -1673,7 +1662,7 @@ export async function webhookMensagem(req: Request, res: Response) {
 
       let atendimento = await tx.atendimento.findFirst({
         where: {
-          cod_loja,
+          cod_loja: codLojaEfetivo,
           contato_id: contato.id,
           status: { in: [STATUS_ABERTO, STATUS_EM_ATENDIMENTO] },
         },
@@ -1683,12 +1672,12 @@ export async function webhookMensagem(req: Request, res: Response) {
       let novo_atendimento = false;
       if (!atendimento) {
         console.info('[mensagens/webhook] nenhum atendimento ativo encontrado (inexistente ou finalizado), criando novo', {
-          cod_loja,
+          cod_loja: codLojaEfetivo,
           contato_id: contato.id,
         });
         atendimento = await tx.atendimento.create({
           data: {
-            cod_loja,
+            cod_loja: codLojaEfetivo,
             contato_id: contato.id,
             cliente_codigo: cliente_codigo ?? contato.cliente_codigo,
             origem,
@@ -1709,7 +1698,7 @@ export async function webhookMensagem(req: Request, res: Response) {
       if (!mensagemIdLegado) {
         const mensagem = await tx.mensagem.create({
           data: {
-            cod_loja,
+            cod_loja: codLojaEfetivo,
             atendimento_id: atendimento.id,
             contato_id: contato.id,
             usuario_id,
@@ -1728,7 +1717,7 @@ export async function webhookMensagem(req: Request, res: Response) {
         attendance_id: atendimento.id,
         contato_id: contato.id,
         legacy_mensagem_id: mensagemIdLegado,
-        cod_loja,
+        cod_loja: codLojaEfetivo,
       });
 
       console.info('[mensagens/webhook] mensagem registrada', {
@@ -1752,7 +1741,7 @@ export async function webhookMensagem(req: Request, res: Response) {
     if (resultado.should_fetch_profile_picture) {
       await tryRefreshContactProfilePhoto({
         contatoId: resultado.contato_id,
-        codLoja: cod_loja,
+        codLoja: codLojaEfetivo,
         instanceName: mensagemNormalizada.instance_name,
         remoteJid: mensagemNormalizada.contact_jid ?? mensagemNormalizada.remote_jid,
         phone: telefone,
