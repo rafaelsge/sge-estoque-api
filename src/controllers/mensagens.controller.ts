@@ -209,6 +209,14 @@ function extractTextFromPayload(payload: any): string | null {
     payload?.data?.message?.extendedTextMessage?.text,
     payload?.data?.message?.imageMessage?.caption,
     payload?.data?.message?.videoMessage?.caption,
+    payload?.data?.messages?.[0]?.message?.conversation,
+    payload?.data?.messages?.[0]?.message?.extendedTextMessage?.text,
+    payload?.data?.messages?.[0]?.message?.imageMessage?.caption,
+    payload?.data?.messages?.[0]?.message?.videoMessage?.caption,
+    payload?.messages?.[0]?.message?.conversation,
+    payload?.messages?.[0]?.message?.extendedTextMessage?.text,
+    payload?.messages?.[0]?.message?.imageMessage?.caption,
+    payload?.messages?.[0]?.message?.videoMessage?.caption,
     payload?.event?.texto,
     payload?.event?.text,
     payload?.event?.body,
@@ -244,6 +252,8 @@ function inferTipoFromPayload(payload: any): string | null {
     payload?.data?.update?.message ??
     payload?.update?.message ??
     payload?.data?.message ??
+    payload?.data?.messages?.[0]?.message ??
+    payload?.messages?.[0]?.message ??
     payload?.message ??
     payload?.event?.message;
   if (!messageObj || typeof messageObj !== 'object') return null;
@@ -502,6 +512,14 @@ function extractMediaBase64FromPayload(payload: any): string | null {
     payload?.data?.message?.videoMessage?.base64,
     payload?.data?.message?.audioMessage?.base64,
     payload?.data?.message?.documentMessage?.base64,
+    payload?.data?.messages?.[0]?.message?.imageMessage?.base64,
+    payload?.data?.messages?.[0]?.message?.videoMessage?.base64,
+    payload?.data?.messages?.[0]?.message?.audioMessage?.base64,
+    payload?.data?.messages?.[0]?.message?.documentMessage?.base64,
+    payload?.messages?.[0]?.message?.imageMessage?.base64,
+    payload?.messages?.[0]?.message?.videoMessage?.base64,
+    payload?.messages?.[0]?.message?.audioMessage?.base64,
+    payload?.messages?.[0]?.message?.documentMessage?.base64,
 
     payload?.event?.message?.imageMessage?.base64,
     payload?.event?.message?.videoMessage?.base64,
@@ -551,6 +569,22 @@ function extractMediaMimeTypeFromPayload(payload: any, arquivoBase64: string | n
     payload?.data?.message?.audioMessage?.mimeType,
     payload?.data?.message?.documentMessage?.mimetype,
     payload?.data?.message?.documentMessage?.mimeType,
+    payload?.data?.messages?.[0]?.message?.imageMessage?.mimetype,
+    payload?.data?.messages?.[0]?.message?.imageMessage?.mimeType,
+    payload?.data?.messages?.[0]?.message?.videoMessage?.mimetype,
+    payload?.data?.messages?.[0]?.message?.videoMessage?.mimeType,
+    payload?.data?.messages?.[0]?.message?.audioMessage?.mimetype,
+    payload?.data?.messages?.[0]?.message?.audioMessage?.mimeType,
+    payload?.data?.messages?.[0]?.message?.documentMessage?.mimetype,
+    payload?.data?.messages?.[0]?.message?.documentMessage?.mimeType,
+    payload?.messages?.[0]?.message?.imageMessage?.mimetype,
+    payload?.messages?.[0]?.message?.imageMessage?.mimeType,
+    payload?.messages?.[0]?.message?.videoMessage?.mimetype,
+    payload?.messages?.[0]?.message?.videoMessage?.mimeType,
+    payload?.messages?.[0]?.message?.audioMessage?.mimetype,
+    payload?.messages?.[0]?.message?.audioMessage?.mimeType,
+    payload?.messages?.[0]?.message?.documentMessage?.mimetype,
+    payload?.messages?.[0]?.message?.documentMessage?.mimeType,
 
     payload?.event?.message?.imageMessage?.mimetype,
     payload?.event?.message?.imageMessage?.mimeType,
@@ -580,6 +614,8 @@ function defaultMimeTypeByTipo(tipo: string): string | null {
 
 function extractFromMe(payload: any): boolean {
   const value =
+    payload?.data?.messages?.[0]?.key?.fromMe ??
+    payload?.messages?.[0]?.key?.fromMe ??
     payload?.data?.key?.fromMe ??
     payload?.key?.fromMe ??
     payload?.data?.fromMe ??
@@ -590,6 +626,8 @@ function extractFromMe(payload: any): boolean {
 
 function extractPhoneFromPayload(payload: any, fromMe: boolean): string | null {
   const remoteJid = readFirstString(
+    payload?.data?.messages?.[0]?.key?.remoteJid,
+    payload?.messages?.[0]?.key?.remoteJid,
     payload?.data?.key?.remoteJid,
     payload?.key?.remoteJid,
     payload?.data?.remoteJid,
@@ -599,6 +637,8 @@ function extractPhoneFromPayload(payload: any, fromMe: boolean): string | null {
   );
 
   const participant = readFirstString(
+    payload?.data?.messages?.[0]?.key?.participant,
+    payload?.messages?.[0]?.key?.participant,
     payload?.data?.key?.participant,
     payload?.key?.participant,
     payload?.data?.participant,
@@ -641,13 +681,20 @@ function extractSourceEventType(payload: any, requestPath: string): string {
     .map((part) => part.trim())
     .find(Boolean);
 
-  return readFirstString(
+  const rawEventType = readFirstString(
     payload?.event,
     payload?.eventType,
     payload?.data?.event,
     payload?.data?.eventType,
     routeEvent,
   ) ?? 'messages.upsert';
+
+  return rawEventType
+    .trim()
+    .toLowerCase()
+    .replace(/^messages[-_]/, 'messages.')
+    .replace(/^contacts[-_]/, 'contacts.')
+    .replace(/^chats[-_]/, 'chats.');
 }
 
 function extractMessageObject(payload: any): any {
@@ -655,6 +702,8 @@ function extractMessageObject(payload: any): any {
     payload?.data?.update?.message ??
     payload?.update?.message ??
     payload?.data?.message ??
+    payload?.data?.messages?.[0]?.message ??
+    payload?.messages?.[0]?.message ??
     payload?.message ??
     payload?.event?.message ??
     null
@@ -686,6 +735,8 @@ function extractContextInfo(payload: any): any {
 function extractRemoteJidFromPayload(payload: any): string | null {
   return normalizeJid(
     readFirstString(
+      payload?.data?.messages?.[0]?.key?.remoteJid,
+      payload?.messages?.[0]?.key?.remoteJid,
       payload?.data?.remoteJid,
       payload?.remoteJid,
       payload?.data?.key?.remoteJid,
@@ -701,6 +752,8 @@ function extractRemoteJidFromPayload(payload: any): string | null {
 function extractParticipantJidFromPayload(payload: any): string | null {
   return normalizeJid(
     readFirstString(
+      payload?.data?.messages?.[0]?.key?.participant,
+      payload?.messages?.[0]?.key?.participant,
       payload?.data?.participant,
       payload?.participant,
       payload?.data?.key?.participant,
@@ -757,6 +810,8 @@ function isDeleteEvent(payload: any, sourceEventType: string): boolean {
     readFirstValue(
       payload?.data?.message?.protocolMessage?.type,
       payload?.message?.protocolMessage?.type,
+      payload?.data?.messages?.[0]?.message?.protocolMessage?.type,
+      payload?.messages?.[0]?.message?.protocolMessage?.type,
       payload?.data?.update?.message?.protocolMessage?.type,
       payload?.update?.message?.protocolMessage?.type,
     ) ?? '',
@@ -776,6 +831,8 @@ function isEditedEvent(payload: any, sourceEventType: string): boolean {
     normalizedEvent.includes('edit') ||
     Boolean(payload?.data?.message?.editedMessage) ||
     Boolean(payload?.message?.editedMessage) ||
+    Boolean(payload?.data?.messages?.[0]?.message?.editedMessage) ||
+    Boolean(payload?.messages?.[0]?.message?.editedMessage) ||
     Boolean(payload?.data?.update?.message?.editedMessage) ||
     Boolean(payload?.update?.message?.editedMessage)
   );
@@ -786,6 +843,8 @@ function extractMessageId(payload: any, sourceEventType: string): string | null 
     return readFirstString(
       payload?.data?.message?.protocolMessage?.key?.id,
       payload?.message?.protocolMessage?.key?.id,
+      payload?.data?.messages?.[0]?.message?.protocolMessage?.key?.id,
+      payload?.messages?.[0]?.message?.protocolMessage?.key?.id,
       payload?.data?.keys?.[0]?.id,
       payload?.keys?.[0]?.id,
       payload?.data?.keyId,
@@ -801,6 +860,8 @@ function extractMessageId(payload: any, sourceEventType: string): string | null 
       payload?.key?.id,
       payload?.data?.messages?.[0]?.key?.id,
       payload?.messages?.[0]?.key?.id,
+      payload?.data?.messageId,
+      payload?.messageId,
       payload?.data?.id,
       payload?.id,
     );
@@ -811,6 +872,7 @@ function extractMessageId(payload: any, sourceEventType: string): string | null 
     payload?.key?.id,
     payload?.data?.messages?.[0]?.key?.id,
     payload?.messages?.[0]?.key?.id,
+    payload?.data?.keyId,
     payload?.data?.messageId,
     payload?.messageId,
     payload?.data?.id,
@@ -826,6 +888,10 @@ function extractCaptionFromPayload(payload: any): string | null {
     payload?.message?.videoMessage?.caption,
     payload?.data?.message?.imageMessage?.caption,
     payload?.data?.message?.videoMessage?.caption,
+    payload?.data?.messages?.[0]?.message?.imageMessage?.caption,
+    payload?.data?.messages?.[0]?.message?.videoMessage?.caption,
+    payload?.messages?.[0]?.message?.imageMessage?.caption,
+    payload?.messages?.[0]?.message?.videoMessage?.caption,
     payload?.event?.message?.imageMessage?.caption,
     payload?.event?.message?.videoMessage?.caption,
     payload?.data?.message?.editedMessage?.message?.imageMessage?.caption,
@@ -849,6 +915,14 @@ function extractMediaUrlFromPayload(payload: any): string | null {
     payload?.data?.message?.videoMessage?.url,
     payload?.data?.message?.audioMessage?.url,
     payload?.data?.message?.documentMessage?.url,
+    payload?.data?.messages?.[0]?.message?.imageMessage?.url,
+    payload?.data?.messages?.[0]?.message?.videoMessage?.url,
+    payload?.data?.messages?.[0]?.message?.audioMessage?.url,
+    payload?.data?.messages?.[0]?.message?.documentMessage?.url,
+    payload?.messages?.[0]?.message?.imageMessage?.url,
+    payload?.messages?.[0]?.message?.videoMessage?.url,
+    payload?.messages?.[0]?.message?.audioMessage?.url,
+    payload?.messages?.[0]?.message?.documentMessage?.url,
     payload?.data?.message?.editedMessage?.message?.imageMessage?.url,
     payload?.data?.message?.editedMessage?.message?.videoMessage?.url,
     payload?.data?.message?.editedMessage?.message?.documentMessage?.url,
@@ -863,6 +937,8 @@ function extractMediaFileNameFromPayload(payload: any): string | null {
     payload?.data?.filename,
     payload?.message?.documentMessage?.fileName,
     payload?.data?.message?.documentMessage?.fileName,
+    payload?.data?.messages?.[0]?.message?.documentMessage?.fileName,
+    payload?.messages?.[0]?.message?.documentMessage?.fileName,
     payload?.data?.message?.editedMessage?.message?.documentMessage?.fileName,
   );
 }
@@ -914,6 +990,8 @@ function extractMessageStatus(payload: any, sourceEventType: string, fromMe: boo
     readFirstValue(
       payload?.status,
       payload?.data?.status,
+      payload?.data?.messages?.[0]?.status,
+      payload?.messages?.[0]?.status,
       payload?.event?.status,
       payload?.data?.messageStatus,
       payload?.messageStatus,
@@ -938,9 +1016,15 @@ function extractNormalizedMessage(payload: any, requestPath: string, receivedAt:
     payload?.instanceName,
     payload?.instance_name,
     payload?.instancia,
+    payload?.instanceId,
     payload?.data?.instance,
     payload?.data?.instanceName,
+    payload?.data?.instance_name,
+    payload?.data?.instanceId,
     payload?.event?.instance,
+    payload?.event?.instanceName,
+    payload?.event?.instance_name,
+    payload?.event?.instanceId,
   );
   const from_me = extractFromMe(payload);
   const remote_jid = extractRemoteJidFromPayload(payload);
@@ -988,6 +1072,10 @@ function extractNormalizedMessage(payload: any, requestPath: string, receivedAt:
         payload?.timestamp,
         payload?.data?.message?.messageTimestamp,
         payload?.message?.messageTimestamp,
+        payload?.data?.messages?.[0]?.messageTimestamp,
+        payload?.messages?.[0]?.messageTimestamp,
+        payload?.data?.messages?.[0]?.message?.messageTimestamp,
+        payload?.messages?.[0]?.message?.messageTimestamp,
         payload?.data?.messageTimestampLow,
       ),
     ),
@@ -1342,6 +1430,23 @@ export async function webhookMensagem(req: Request, res: Response) {
 
     const mensagemNormalizada = extractNormalizedMessage(req.body, req.originalUrl || req.path, receivedAt);
     const eventoIngestao = await registrarEventoIngestao(prisma, mensagemNormalizada);
+    const sourceEventTypeNormalized = mensagemNormalizada.source_event_type.toLowerCase();
+
+    if (
+      !sourceEventTypeNormalized.startsWith('messages.') &&
+      !sourceEventTypeNormalized.startsWith('messages-') &&
+      !sourceEventTypeNormalized.startsWith('messages_')
+    ) {
+      console.info('[mensagens/webhook] evento nao relacionado a mensagens, persistido apenas no log bruto', {
+        source_event_type: mensagemNormalizada.source_event_type,
+        ingest_event_id: eventoIngestao.id,
+      });
+      return res.status(202).json({
+        message: 'Evento recebido e persistido no log bruto.',
+        ingest_event_id: eventoIngestao.id,
+        attendance_linked: false,
+      });
+    }
 
     const cod_loja_payload = asPositiveInt(req.body?.cod_loja);
     const apikey = readFirstString(
@@ -1462,10 +1567,11 @@ export async function webhookMensagem(req: Request, res: Response) {
     });
 
     if (!mensagemNormalizada.instance_name || !mensagemNormalizada.message_id) {
-      console.warn('[mensagens/webhook] rejeitado: instance_name/message_id ausentes para idempotencia');
-      return res.status(400).json({
-        error: 'Campos instance_name e message_id sao obrigatorios para persistencia idempotente.',
+      console.warn('[mensagens/webhook] persistido apenas no log bruto: instance_name/message_id ausentes');
+      return res.status(202).json({
+        message: 'Evento recebido e persistido no log bruto sem idempotencia canonica.',
         ingest_event_id: eventoIngestao.id,
+        attendance_linked: false,
       });
     }
 
